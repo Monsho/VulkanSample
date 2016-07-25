@@ -1,5 +1,5 @@
 #include <vulkan/vulkan.h>
-#include <vulkan/vk_cpp.hpp>
+#include <vulkan/vulkan.hpp>
 #include <iostream>
 #include <sstream>
 #include <cmath>
