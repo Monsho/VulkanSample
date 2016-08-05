@@ -9,14 +9,10 @@ layout (location = 2) in vec2 inUV;
 
 layout (binding = 0) uniform SceneData
 {
+	mat4 mtxWorld;
 	mat4 mtxView;
 	mat4 mtxProj;
 } uScene;
-
-layout (push_constant) uniform MeshData
-{
-	mat4 mtxWorld;
-} uMesh;
 
 layout (location = 0) out vec4 outColor;
 layout (location = 1) out vec2 outUV;
@@ -31,5 +27,5 @@ void main()
 {
 	outColor = inColor;
 	outUV = inUV;
-	gl_Position = uScene.mtxProj * uScene.mtxView * uMesh.mtxWorld * vec4(inPos.xyz, 1.0);
+	gl_Position = uScene.mtxProj * uScene.mtxView * uScene.mtxWorld * vec4(inPos.xyz, 1.0);
 }

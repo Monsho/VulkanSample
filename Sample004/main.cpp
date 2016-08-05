@@ -1,8 +1,5 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan.hpp>
-#include <glm/matrix.hpp>
-#include <glm/gtc/constants.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
 #include <sstream>
 #include <cmath>
@@ -67,12 +64,9 @@ namespace
 
 	struct SceneData
 	{
-		glm::mat4x4	mtxView;
-		glm::mat4x4	mtxProj;
-	};
-	struct MeshData
-	{
-		glm::mat4x4	mtxWorld;
+		float	mtxWorld[16];
+		float	mtxView[16];
+		float	mtxProj[16];
 	};
 	BufferResource						g_VkUniformBuffer;
 	vk::DescriptorBufferInfo			g_VkUniformInfo;
@@ -93,6 +87,44 @@ namespace
 	VkDebugReportCallbackEXT			g_fMsgCallback;
 #endif
 
+	void StoreIdentityMatrix(float mtx[16])
+	{
+		static const float kIdentity[16] = {
+			1.0f, 0.0f, 0.0f, 0.0f,
+			0.0f, 1.0f, 0.0f, 0.0f,
+			0.0f, 0.0f, 1.0f, 0.0f,
+			0.0f, 0.0f, 0.0f, 1.0f
+		};
+		memcpy(mtx, kIdentity, sizeof(kIdentity));
+	}
+
+	float Deg2Rad(float deg)
+	{
+		return deg * 3.1415926f / 180.0f;
+	}
+
+	void RotY(float mtx[16], float rotY)
+	{
+		StoreIdentityMatrix(mtx);
+		mtx[0] = cosf(rotY);
+		mtx[2] = sinf(rotY);
+		mtx[8] = -sinf(rotY);
+		mtx[10] = cosf(rotY);
+	}
+
+	void PerspectiveFov(float mtx[16], float fovY, float aspect, float zn, float zf)
+	{
+		float h = 1.0f / tanf(fovY * 0.5f);
+		float w = h / aspect;
+		float z = zf / (zn - zf);
+		memset(mtx, 0, sizeof(mtx));
+		mtx[0] = w;
+		mtx[5] = -h;
+		mtx[10] = z;
+		mtx[11] = -1.0f;
+		mtx[14] = zn * z;
+	}
+
 	// 対象フラグのキューインデックスを取得する
 	static const uint32_t	kQueueIndexNotFound = 0xffffffff;
 	uint32_t FindQueue(vk::QueueFlags queueFlag, const vk::SurfaceKHR& surface = vk::SurfaceKHR())
@@ -103,7 +135,7 @@ namespace
 		{
 			if (queueProps[i].queueFlags & queueFlag)
 			{
-				if (surface && !g_VkPhysicalDevice.getSurfaceSupportKHR(i, surface))
+				if (!g_VkPhysicalDevice.getSurfaceSupportKHR(i, surface))
 				{
 					continue;
 				}
@@ -1165,8 +1197,9 @@ bool InitializeRenderResource()
 
 		// 行列は単位行列を突っ込んでおく
 		SceneData data;
-		data.mtxView = glm::mat4x4();
-		data.mtxProj = glm::mat4x4();
+		StoreIdentityMatrix(data.mtxWorld);
+		StoreIdentityMatrix(data.mtxView);
+		StoreIdentityMatrix(data.mtxProj);
 
 		// バッファに情報をコピー
 		void *pData = g_VkDevice.mapMemory(g_VkUniformBuffer.devMem, 0, sizeof(SceneData), vk::MemoryMapFlags());
@@ -1447,17 +1480,11 @@ void DestroyRenderResource()
 bool InitializePipeline()
 {
 	{
-		// 今回はPushConstantを利用する
-		// 小さなサイズの定数バッファはコマンドバッファに乗せてシェーダに送ることが可能
-		vk::PushConstantRange pushConstantRange(vk::ShaderStageFlagBits::eVertex, 0, sizeof(MeshData));
-
 		// デスクリプタセットレイアウトに対応したパイプラインレイアウトを生成する
 		// 通常は1対1で生成するのかな？
 		vk::PipelineLayoutCreateInfo pPipelineLayoutCreateInfo;
 		pPipelineLayoutCreateInfo.setLayoutCount = 1;
 		pPipelineLayoutCreateInfo.pSetLayouts = &g_VkDescSetLayout;
-		pPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-		pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
 		g_VkPipeLayout = g_VkDevice.createPipelineLayout(pPipelineLayoutCreateInfo);
 	}
 
@@ -1580,19 +1607,18 @@ void DrawScene()
 		// UniformBufferをアップデートする
 		// RenderPass内で発行してはいけないらしいので、beginRenderPass～endRenderPassの外部で行う
 		static float sRotY = 1.0f;
-
-		SceneData scene;
-		scene.mtxView = glm::lookAtRH(glm::vec3(0.0f, 0.0f, 10.0f), glm::vec3(), glm::vec3(0.0f, 1.0f, 0.0f));
-		scene.mtxProj = glm::perspectiveRH(glm::radians(60.0f), 1920.0f / 1080.0f, 1.0f, 100.0f);
-
-		MeshData mesh1, mesh2;
-		mesh1.mtxWorld = glm::rotate(glm::mat4x4(), glm::radians(sRotY), glm::vec3(0.0f, 1.0f, 0.0f));
+		SceneData scene1, scene2;
+		StoreIdentityMatrix(scene1.mtxWorld);
+		StoreIdentityMatrix(scene1.mtxView);
+		StoreIdentityMatrix(scene1.mtxProj);
+		PerspectiveFov(scene1.mtxProj, Deg2Rad(60.0f), 1920.0f / 1080.0f, 1.0f, 100.0f);
+		RotY(scene1.mtxWorld, Deg2Rad(sRotY));
 		sRotY += 0.1f; if (sRotY > 360.0f) sRotY -= 360.0f;
-		mesh2 = mesh1;
-		mesh2.mtxWorld[3].x = 0.5f;
-		mesh2.mtxWorld[3].z = 7.0f;
-
-		cmdBuffer.updateBuffer(g_VkUniformBuffer.buffer, 0, sizeof(scene), reinterpret_cast<uint32_t*>(&scene));
+		scene1.mtxView[14] = -10.0f;
+		scene2 = scene1;
+		scene2.mtxWorld[12] = 0.5f;
+		scene2.mtxWorld[14] = 7.0f;
+		cmdBuffer.updateBuffer(g_VkUniformBuffer.buffer, 0, sizeof(scene1), reinterpret_cast<uint32_t*>(&scene1));
 
 		vk::ClearColorValue clearColor(std::array<float, 4>{ 0.0f, 0.0f, 0.5f, 1.0f });
 		vk::ClearDepthStencilValue clearDepth(1.0f, 0);
@@ -1664,26 +1690,22 @@ void DrawScene()
 			cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, g_VkSamplePipeline);
 			cmdBuffer.bindVertexBuffers(0, g_VkVBuffer.buffer, offsets);
 			cmdBuffer.bindIndexBuffer(g_VkIBuffer.buffer, 0, vk::IndexType::eUint32);
-			cmdBuffer.pushConstants(g_VkPipeLayout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(mesh1), &mesh1);
-			cmdBuffer.drawIndexed(6, 1, 0, 0, 1);
-
-			cmdBuffer.pushConstants(g_VkPipeLayout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(mesh2), &mesh2);
 			cmdBuffer.drawIndexed(6, 1, 0, 0, 1);
 
 		cmdBuffer.endRenderPass();
 
-		//cmdBuffer.updateBuffer(g_VkUniformBuffer.buffer, 0, sizeof(scene2), reinterpret_cast<uint32_t*>(&scene2));
+		cmdBuffer.updateBuffer(g_VkUniformBuffer.buffer, 0, sizeof(scene2), reinterpret_cast<uint32_t*>(&scene2));
 
-		//cmdBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
+		cmdBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
 
-		//	// 各リソース等のバインド
-		//	cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, g_VkPipeLayout, 0, g_VkDescSets, nullptr);
-		//	cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, g_VkSamplePipeline);
-		//	cmdBuffer.bindVertexBuffers(0, g_VkVBuffer.buffer, offsets);
-		//	cmdBuffer.bindIndexBuffer(g_VkIBuffer.buffer, 0, vk::IndexType::eUint32);
-		//	cmdBuffer.drawIndexed(6, 1, 0, 0, 1);
+			// 各リソース等のバインド
+			cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, g_VkPipeLayout, 0, g_VkDescSets, nullptr);
+			cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, g_VkSamplePipeline);
+			cmdBuffer.bindVertexBuffers(0, g_VkVBuffer.buffer, offsets);
+			cmdBuffer.bindIndexBuffer(g_VkIBuffer.buffer, 0, vk::IndexType::eUint32);
+			cmdBuffer.drawIndexed(6, 1, 0, 0, 1);
 
-		//cmdBuffer.endRenderPass();
+		cmdBuffer.endRenderPass();
 
 		// Presentのため、カラーバッファのイメージレイアウトを変更
 		{
