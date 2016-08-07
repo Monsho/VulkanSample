@@ -79,9 +79,21 @@
     <Text Include="ReadMe.txt" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="header\vsl\application.h" />
+    <ClInclude Include="header\vsl\buffer.h" />
+    <ClInclude Include="header\vsl\device.h" />
+    <ClInclude Include="header\vsl\image.h" />
+    <ClInclude Include="header\vsl\shader.h" />
+    <ClInclude Include="header\vsl\swapchain.h" />
     <ClInclude Include="header\vsl\targa.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="source\application.cpp" />
+    <ClCompile Include="source\buffer.cpp" />
+    <ClCompile Include="source\device.cpp" />
+    <ClCompile Include="source\image.cpp" />
+    <ClCompile Include="source\shader.cpp" />
+    <ClCompile Include="source\swapchain.cpp" />
     <ClCompile Include="source\targa.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
