@@ -8,6 +8,10 @@
       <AdditionalIncludeDirectories>C:\VulkanSDK\1.0.21.1\Include;$(SolutionDir)vulkan_hpp;$(SolutionDir)VulkanSampleLib\header;$(SolutionDir)glm;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>VK_USE_PLATFORM_WIN32_KHR;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>C:\VulkanSDK\1.0.21.1\Bin;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>vulkan-1.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
   </ItemDefinitionGroup>
   <ItemGroup />
 </Project>
