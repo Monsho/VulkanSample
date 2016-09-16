@@ -83,6 +83,16 @@ namespace vsl
 		pOwner_ = nullptr;
 	}
 
+	//----
+	void Buffer::CopyFrom(vk::CommandBuffer& cmdBuffer, Buffer& srcBuffer, size_t srcOffset, size_t dstOffset, size_t size)
+	{
+		if (buffer_.operator bool())
+		{
+			vk::BufferCopy copyRegion(srcOffset, dstOffset, (size == 0) ? size_ : size);
+			cmdBuffer.copyBuffer(srcBuffer.buffer_, buffer_, copyRegion);
+		}
+	}
+
 }	// namespace vsl
 
 

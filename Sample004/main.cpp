@@ -7,6 +7,7 @@
 #include <vsl/device.h>
 #include <vsl/image.h>
 #include <vsl/buffer.h>
+#include <vsl/shader.h>
 
 
 namespace
@@ -64,6 +65,12 @@ public:
 			frameBuffers_ = device.GetSwapchain().CreateFramebuffers(framebufferCreateInfo);
 		}
 
+		// 描画リソースの初期化
+		if (!InitializeRenderResource(device, initCmdBuffer))
+		{
+			return false;
+		}
+
 		// コマンド積みこみ終了
 		initCmdBuffer.end();
 
@@ -73,6 +80,11 @@ public:
 		copySubmitInfo.pCommandBuffers = &initCmdBuffer;
 		device.GetQueue().submit(copySubmitInfo, VK_NULL_HANDLE);
 		device.GetQueue().waitIdle();
+
+		// 一時リソースの破棄
+		texStaging_.Destroy();
+		vbStaging_.Destroy();
+		ibStaging_.Destroy();
 
 		return true;
 	}
@@ -142,6 +154,14 @@ public:
 	bool Terminate(vsl::Device& device)
 	{
 		vk::Device& d = device.GetDevice();
+
+		vsTest_.Destroy();
+		psTest_.Destroy();
+
+		texture_.Destroy();
+
+		vbuffer_.Destroy();
+		ibuffer_.Destroy();
 
 		for (auto& fb : frameBuffers_)
 		{
@@ -220,10 +240,76 @@ private:
 		return renderPass_.operator bool();
 	}
 
+	//----
+	bool InitializeRenderResource(vsl::Device& device, vk::CommandBuffer& initCmdBuffer)
+	{
+		// シェーダ初期化
+		if (!vsTest_.CreateFromFile(device, "data/test.vert.spv"))
+		{
+			return false;
+		}
+		if (!psTest_.CreateFromFile(device, "data/test.frag.spv"))
+		{
+			return false;
+		}
+
+		// テクスチャ読み込み
+		if (!texture_.InitializeFromTgaImage(device, initCmdBuffer, texStaging_, "data/icon.tga"))
+		{
+			return false;
+		}
+
+		// 頂点バッファ
+		{
+			struct Vertex
+			{
+				glm::vec3	pos;
+				glm::vec4	color;
+				glm::vec2	uv;
+			};
+			Vertex vertexData[] = {
+				{ { -0.5f,  0.5f, 0.0f },{ 1.0f, 1.0f, 1.0f, 1.0f },{ 0.0f, 1.0f } },
+				{ { 0.5f,  0.5f, 0.0f },{ 1.0f, 1.0f, 1.0f, 1.0f },{ 1.0f, 1.0f } },
+				{ { -0.5f, -0.5f, 0.0f },{ 1.0f, 1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f } },
+				{ { 0.5f, -0.5f, 0.0f },{ 1.0f, 1.0f, 1.0f, 1.0f },{ 1.0f, 0.0f } }
+			};
+			if (!vbStaging_.InitializeAsStaging(device, sizeof(vertexData), vertexData))
+			{
+				return false;
+			}
+			if (!vbuffer_.InitializeAsVertexBuffer(device, sizeof(vertexData)))
+			{
+				return false;
+			}
+			vbuffer_.CopyFrom(initCmdBuffer, vbStaging_);
+		}
+		// インデックスバッファ
+		{
+			uint32_t indexData[] = { 0, 1, 2, 1, 3, 2 };
+			if (!ibStaging_.InitializeAsStaging(device, sizeof(indexData), indexData))
+			{
+				return false;
+			}
+			if (!ibuffer_.InitializeAsIndexBuffer(device, sizeof(indexData)))
+			{
+				return false;
+			}
+			ibuffer_.CopyFrom(initCmdBuffer, ibStaging_);
+		}
+
+		return true;
+	}
+
 private:
 	vk::RenderPass	renderPass_;
 	vsl::Image		depthBuffer_;
 	std::vector<vk::Framebuffer>	frameBuffers_;
+
+	vsl::Shader		vsTest_, psTest_;
+	vsl::Buffer		vbuffer_, ibuffer_;
+	vsl::Image		texture_;
+
+	vsl::Buffer		vbStaging_, ibStaging_, texStaging_;
 };	// class MySample
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow)

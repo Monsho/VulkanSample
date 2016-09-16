@@ -26,6 +26,8 @@ namespace vsl
 
 		void Destroy();
 
+		void CopyFrom(vk::CommandBuffer& cmdBuffer, Buffer& srcBuffer, size_t srcOffset = 0, size_t dstOffset = 0, size_t size = 0);
+
 		// getter
 		vk::Buffer& GetBuffer() { return buffer_; }
 
