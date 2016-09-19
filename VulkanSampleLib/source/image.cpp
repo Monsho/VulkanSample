@@ -7,6 +7,89 @@
 namespace vsl
 {
 	//----
+	bool Image::InitializeAsColorBuffer(
+		Device& owner,
+		vk::CommandBuffer& cmdBuff,
+		vk::Format format,
+		uint16_t width, uint16_t height,
+		uint16_t mipLevels, uint16_t arrayLayers)
+	{
+		pOwner_ = &owner;
+		format_ = format;
+		width_ = width;
+		height_ = height;
+
+		// 指定のフォーマットがサポートされているか調べる
+		vk::FormatProperties formatProps = owner.GetPhysicalDevice().getFormatProperties(format);
+		assert(formatProps.optimalTilingFeatures & vk::FormatFeatureFlagBits::eColorAttachment);
+
+		vk::ImageAspectFlags aspect = vk::ImageAspectFlagBits::eColor;
+
+		vk::Device& device = owner.GetDevice();
+
+		// イメージを作成する
+		vk::ImageCreateInfo imageCreateInfo;
+		imageCreateInfo.imageType = vk::ImageType::e2D;
+		imageCreateInfo.extent = vk::Extent3D(width, height, 1);
+		imageCreateInfo.format = format;
+		imageCreateInfo.mipLevels = mipLevels;
+		imageCreateInfo.arrayLayers = arrayLayers;
+		imageCreateInfo.usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
+		image_ = device.createImage(imageCreateInfo);
+		if (!image_)
+		{
+			return false;
+		}
+
+		// メモリを確保
+		vk::MemoryRequirements memReqs = device.getImageMemoryRequirements(image_);
+		vk::MemoryAllocateInfo memAlloc;
+		memAlloc.allocationSize = memReqs.size;
+		memAlloc.memoryTypeIndex = owner.GetMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+		devMem_ = device.allocateMemory(memAlloc);
+		if (!devMem_)
+		{
+			return false;
+		}
+		device.bindImageMemory(image_, devMem_, 0);
+
+		// Viewを作成
+		vk::ImageViewCreateInfo viewCreateInfo;
+		viewCreateInfo.viewType = vk::ImageViewType::e2D;
+		viewCreateInfo.format = format;
+		viewCreateInfo.components = { vk::ComponentSwizzle::eR, vk::ComponentSwizzle::eG, vk::ComponentSwizzle::eB, vk::ComponentSwizzle::eA };
+		viewCreateInfo.subresourceRange.aspectMask = aspect;
+		viewCreateInfo.subresourceRange.levelCount = 1;
+		viewCreateInfo.subresourceRange.layerCount = 1;
+		viewCreateInfo.image = image_;
+		view_ = device.createImageView(viewCreateInfo);
+		if (!view_)
+		{
+			return false;
+		}
+
+		// レイアウト変更のコマンドを発行する
+		{
+			vk::CommandBufferBeginInfo cmdBufferBeginInfo;
+			vk::BufferCopy copyRegion;
+
+			vk::ImageSubresourceRange subresourceRange;
+			subresourceRange.aspectMask = aspect;
+			subresourceRange.levelCount = 1;
+			subresourceRange.layerCount = 1;
+			Image::SetImageLayout(
+				cmdBuff,
+				image_,
+				vk::ImageLayout::eUndefined,
+				vk::ImageLayout::eColorAttachmentOptimal,
+				subresourceRange);
+			currentLayout_ = vk::ImageLayout::eColorAttachmentOptimal;
+		}
+
+		return true;
+	}
+
+	//----
 	bool Image::InitializeAsDepthStencilBuffer(
 		Device& owner,
 		vk::CommandBuffer& cmdBuff,

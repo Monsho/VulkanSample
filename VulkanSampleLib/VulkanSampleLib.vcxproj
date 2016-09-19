@@ -83,6 +83,7 @@
     <ClInclude Include="header\vsl\buffer.h" />
     <ClInclude Include="header\vsl\device.h" />
     <ClInclude Include="header\vsl\image.h" />
+    <ClInclude Include="header\vsl\render_pass.h" />
     <ClInclude Include="header\vsl\shader.h" />
     <ClInclude Include="header\vsl\swapchain.h" />
     <ClInclude Include="header\vsl\targa.h" />
@@ -92,6 +93,7 @@
     <ClCompile Include="source\buffer.cpp" />
     <ClCompile Include="source\device.cpp" />
     <ClCompile Include="source\image.cpp" />
+    <ClCompile Include="source\render_pass.cpp" />
     <ClCompile Include="source\shader.cpp" />
     <ClCompile Include="source\swapchain.cpp" />
     <ClCompile Include="source\targa.cpp" />

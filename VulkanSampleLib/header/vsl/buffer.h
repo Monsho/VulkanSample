@@ -28,6 +28,11 @@ namespace vsl
 
 		void CopyFrom(vk::CommandBuffer& cmdBuffer, Buffer& srcBuffer, size_t srcOffset = 0, size_t dstOffset = 0, size_t size = 0);
 
+		vk::DescriptorBufferInfo GetDescInfo()
+		{
+			return vk::DescriptorBufferInfo(buffer_, 0, size_);
+		}
+
 		// getter
 		vk::Buffer& GetBuffer() { return buffer_; }
 

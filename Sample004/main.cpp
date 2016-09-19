@@ -8,6 +8,7 @@
 #include <vsl/image.h>
 #include <vsl/buffer.h>
 #include <vsl/shader.h>
+#include <vsl/render_pass.h>
 
 
 namespace
@@ -22,6 +23,38 @@ bool Initialize(vsl::Device& device)
 }
 class MySample
 {
+	struct Vertex
+	{
+		glm::vec3	pos;
+		glm::vec4	color;
+		glm::vec2	uv;
+	};
+
+	struct PostVertex
+	{
+		glm::vec4	pos;
+		glm::vec2	uv;
+	};
+
+	struct SceneData
+	{
+		glm::mat4x4		mtxView_;
+		glm::mat4x4		mtxProj_;
+
+		SceneData()
+			: mtxView_(), mtxProj_()
+		{}
+	};
+
+	struct MeshData
+	{
+		glm::mat4x4		mtxModel_;
+
+		MeshData()
+			: mtxModel_()
+		{}
+	};
+
 public:
 	MySample()
 	{}
@@ -31,6 +64,14 @@ public:
 	{
 		// レンダーパスの初期化
 		if (!InitializeRenderPass(device))
+		{
+			return false;
+		}
+		if (!InitializeMeshPass(device))
+		{
+			return false;
+		}
+		if (!InitializePostPass(device))
 		{
 			return false;
 		}
@@ -48,13 +89,22 @@ public:
 			return false;
 		}
 
+		// オフスクリーンバッファの初期化
+		if (!offscreenBuffer_.InitializeAsColorBuffer(
+			device, initCmdBuffer,
+			vk::Format::eB10G11R11UfloatPack32,
+			kScreenWidth, kScreenHeight))
+		{
+			return false;
+		}
+
 		// フレームバッファ設定
 		{
 			std::array<vk::ImageView, 2> views;
 			views[1] = depthBuffer_.GetView();
 
 			vk::FramebufferCreateInfo framebufferCreateInfo;
-			framebufferCreateInfo.renderPass = renderPass_;
+			framebufferCreateInfo.renderPass = renderPass_.GetPass();
 			framebufferCreateInfo.attachmentCount = static_cast<uint32_t>(views.size());
 			framebufferCreateInfo.pAttachments = views.data();
 			framebufferCreateInfo.width = kScreenWidth;
@@ -63,6 +113,22 @@ public:
 
 			// Swapchainからフレームバッファを生成する
 			frameBuffers_ = device.GetSwapchain().CreateFramebuffers(framebufferCreateInfo);
+		}
+		{
+			std::array<vk::ImageView, 2> views;
+			views[0] = offscreenBuffer_.GetView();
+			views[1] = depthBuffer_.GetView();
+
+			vk::FramebufferCreateInfo framebufferCreateInfo;
+			framebufferCreateInfo.renderPass = meshPass_.GetPass();
+			framebufferCreateInfo.attachmentCount = static_cast<uint32_t>(views.size());
+			framebufferCreateInfo.pAttachments = views.data();
+			framebufferCreateInfo.width = kScreenWidth;
+			framebufferCreateInfo.height = kScreenHeight;
+			framebufferCreateInfo.layers = 1;
+
+			// Swapchainからフレームバッファを生成する
+			offscreenFrame_ = device.GetDevice().createFramebuffer(framebufferCreateInfo);
 		}
 
 		// 描画リソースの初期化
@@ -85,6 +151,14 @@ public:
 		texStaging_.Destroy();
 		vbStaging_.Destroy();
 		ibStaging_.Destroy();
+		pvbStaging_.Destroy();
+		pibStaging_.Destroy();
+
+		// パイプラインの初期化
+		if (!InitializePipeline(device))
+		{
+			return false;
+		}
 
 		return true;
 	}
@@ -95,6 +169,17 @@ public:
 		auto currentIndex = device.AcquireNextImage();
 		auto& cmdBuffer = device.BeginMainCommandBuffer();
 		auto& currentImage = device.GetCurrentSwapchainImage();
+		
+		static float sRotY = 1.0f;
+
+		// UniformBufferをアップデートする
+		{
+			SceneData scene;
+			scene.mtxView_ = glm::lookAtRH(glm::vec3(0.0f, 0.0f, 10.0f), glm::vec3(), glm::vec3(0.0f, 1.0f, 0.0f));
+			scene.mtxProj_ = glm::perspectiveRH(glm::radians(60.0f), static_cast<float>(kScreenWidth) / static_cast<float>(kScreenHeight), 1.0f, 100.0f);
+
+			cmdBuffer.updateBuffer(sceneBuffer_.GetBuffer(), 0, sizeof(scene), reinterpret_cast<uint32_t*>(&scene));
+		}
 
 		// バッファクリア
 		{
@@ -118,15 +203,12 @@ public:
 				vk::ImageLayout::eUndefined,
 				vk::ImageLayout::eTransferDstOptimal,
 				colorSubRange);
-			vsl::Image::SetImageLayout(
-				cmdBuffer,
-				depthBuffer_.GetImage(),
-				vk::ImageLayout::eDepthStencilAttachmentOptimal,
-				vk::ImageLayout::eTransferDstOptimal,
-				depthSubRange);
+			depthBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eTransferDstOptimal, depthSubRange);
+			offscreenBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eTransferDstOptimal, colorSubRange);
 
 			// クリア
 			cmdBuffer.clearColorImage(currentImage, vk::ImageLayout::eTransferDstOptimal, clearColor, colorSubRange);
+			cmdBuffer.clearColorImage(offscreenBuffer_.GetImage(), vk::ImageLayout::eTransferDstOptimal, clearColor, colorSubRange);
 			cmdBuffer.clearDepthStencilImage(depthBuffer_.GetImage(), vk::ImageLayout::eTransferDstOptimal, clearDepth, depthSubRange);
 
 			// 描画のためにレイアウトを変更
@@ -136,13 +218,45 @@ public:
 				vk::ImageLayout::eTransferDstOptimal,
 				vk::ImageLayout::eColorAttachmentOptimal,
 				colorSubRange);
-			vsl::Image::SetImageLayout(
-				cmdBuffer,
-				depthBuffer_.GetImage(),
-				vk::ImageLayout::eTransferDstOptimal,
-				vk::ImageLayout::eDepthStencilAttachmentOptimal,
-				depthSubRange);
+			depthBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eDepthStencilAttachmentOptimal, depthSubRange);
+			offscreenBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eColorAttachmentOptimal, colorSubRange);
 		}
+
+		// 描画パス開始
+		vk::RenderPassBeginInfo renderPassBeginInfo;
+		renderPassBeginInfo.renderPass = meshPass_.GetPass();
+		renderPassBeginInfo.renderArea.extent = vk::Extent2D(kScreenWidth, kScreenHeight);
+		renderPassBeginInfo.clearValueCount = 0;
+		renderPassBeginInfo.pClearValues = nullptr;
+		renderPassBeginInfo.framebuffer = offscreenFrame_;
+		cmdBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
+		{
+			vk::Viewport viewport = vk::Viewport(0.0f, 0.0f, static_cast<float>(kScreenWidth), static_cast<float>(kScreenHeight), 0.0f, 1.0f);
+			cmdBuffer.setViewport(0, viewport);
+
+			vk::Rect2D scissor = vk::Rect2D(vk::Offset2D(), vk::Extent2D(kScreenWidth, kScreenHeight));
+			cmdBuffer.setScissor(0, scissor);
+
+			// 各リソース等のバインド
+			vk::DeviceSize offsets = 0;
+			cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipeLayout_, 0, descSets_[0], nullptr);
+			cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline_);
+			cmdBuffer.bindVertexBuffers(0, vbuffer_.GetBuffer(), offsets);
+			cmdBuffer.bindIndexBuffer(ibuffer_.GetBuffer(), 0, vk::IndexType::eUint32);
+
+			MeshData mesh1;
+			mesh1.mtxModel_ = glm::rotate(glm::mat4x4(), glm::radians(sRotY), glm::vec3(0.0f, 1.0f, 0.0f));
+			sRotY += 0.1f; if (sRotY > 360.0f) sRotY -= 360.0f;
+			cmdBuffer.pushConstants(pipeLayout_, vk::ShaderStageFlagBits::eVertex, 0, sizeof(mesh1), &mesh1);
+			cmdBuffer.drawIndexed(6, 1, 0, 0, 1);
+
+			MeshData mesh2 = mesh1;
+			mesh2.mtxModel_[3].x = 0.5f;
+			mesh2.mtxModel_[3].z = 7.0f;
+			cmdBuffer.pushConstants(pipeLayout_, vk::ShaderStageFlagBits::eVertex, 0, sizeof(mesh2), &mesh2);
+			cmdBuffer.drawIndexed(6, 1, 0, 0, 1);
+		}
+		cmdBuffer.endRenderPass();
 
 		device.ReadyPresentAndEndMainCommandBuffer();
 		device.SubmitAndPresent();
@@ -155,20 +269,39 @@ public:
 	{
 		vk::Device& d = device.GetDevice();
 
+		d.destroyPipeline(pipeline_);
+		d.destroyPipelineLayout(pipeLayout_);
+
 		vsTest_.Destroy();
 		psTest_.Destroy();
+		vsPost_.Destroy();
+		psPost_.Destroy();
 
+		for (auto& dl : descLayouts_)
+		{
+			d.destroyDescriptorSetLayout(dl);
+		}
+		d.destroyDescriptorPool(descPool_);
+
+		d.destroySampler(sampler_);
 		texture_.Destroy();
 
 		vbuffer_.Destroy();
 		ibuffer_.Destroy();
+		pvbuffer_.Destroy();
+		pibuffer_.Destroy();
+		sceneBuffer_.Destroy();
 
+		d.destroyFramebuffer(offscreenFrame_);
 		for (auto& fb : frameBuffers_)
 		{
 			d.destroyFramebuffer(fb);
 		}
+		offscreenBuffer_.Destroy();
 		depthBuffer_.Destroy();
-		if (renderPass_) d.destroyRenderPass(renderPass_);
+		renderPass_.Destroy();
+		meshPass_.Destroy();
+		postPass_.Destroy();
 
 		return true;
 	}
@@ -177,67 +310,25 @@ private:
 	//----
 	bool InitializeRenderPass(vsl::Device& device)
 	{
-		// RenderPass設定
-		std::array<vk::AttachmentDescription, 2> attachmentDescs;
-		std::array<vk::AttachmentReference, 2> attachmentRefs;
+		vk::Format colorFormat = device.GetSwapchain().GetFormat();
+		vk::Format depthFormat = vk::Format::eD32SfloatS8Uint;
 
-		// カラーバッファのアタッチメント設定
-		attachmentDescs[0].format = device.GetSwapchain().GetFormat();
-		attachmentDescs[0].loadOp = vk::AttachmentLoadOp::eDontCare;
-		attachmentDescs[0].storeOp = vk::AttachmentStoreOp::eStore;
-		attachmentDescs[0].initialLayout = vk::ImageLayout::eColorAttachmentOptimal;
-		attachmentDescs[0].finalLayout = vk::ImageLayout::eColorAttachmentOptimal;
+		return renderPass_.InitializeAsColorStandard(device, colorFormat, depthFormat);
+	}
+	//----
+	bool InitializeMeshPass(vsl::Device& device)
+	{
+		vk::Format colorFormat = vk::Format::eB10G11R11UfloatPack32;
+		vk::Format depthFormat = vk::Format::eD32SfloatS8Uint;
 
-		// 深度バッファのアタッチメント設定
-		attachmentDescs[1].format = vk::Format::eD32SfloatS8Uint;
-		attachmentDescs[1].loadOp = vk::AttachmentLoadOp::eDontCare;
-		attachmentDescs[1].storeOp = vk::AttachmentStoreOp::eDontCare;
-		attachmentDescs[1].initialLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
-		attachmentDescs[1].finalLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
+		return meshPass_.InitializeAsColorStandard(device, colorFormat, depthFormat);
+	}
+	//----
+	bool InitializePostPass(vsl::Device& device)
+	{
+		vk::Format colorFormat = device.GetSwapchain().GetFormat();
 
-		// カラーバッファのリファレンス設定
-		vk::AttachmentReference& colorReference = attachmentRefs[0];
-		colorReference.attachment = 0;
-		colorReference.layout = vk::ImageLayout::eColorAttachmentOptimal;
-
-		// 深度バッファのリファレンス設定
-		vk::AttachmentReference& depthReference = attachmentRefs[1];
-		depthReference.attachment = 1;
-		depthReference.layout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
-
-		std::array<vk::SubpassDescription, 1> subpasses;
-		{
-			vk::SubpassDescription& subpass = subpasses[0];
-			subpass.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
-			subpass.colorAttachmentCount = 1;
-			subpass.pColorAttachments = &attachmentRefs[0];
-			subpass.pDepthStencilAttachment = &attachmentRefs[1];
-		}
-
-		std::array<vk::SubpassDependency, 1> subpassDepends;
-		{
-			vk::SubpassDependency& dependency = subpassDepends[0];
-			dependency.srcSubpass = 0;
-			dependency.dstSubpass = VK_SUBPASS_EXTERNAL;
-			dependency.srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
-			dependency.dstAccessMask = vk::AccessFlagBits::eColorAttachmentRead;
-			dependency.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
-			dependency.srcStageMask = vk::PipelineStageFlagBits::eBottomOfPipe;
-		}
-
-		// RenderPass生成
-		{
-			vk::RenderPassCreateInfo renderPassInfo;
-			renderPassInfo.attachmentCount = (uint32_t)attachmentDescs.size();
-			renderPassInfo.pAttachments = attachmentDescs.data();
-			renderPassInfo.subpassCount = (uint32_t)subpasses.size();
-			renderPassInfo.pSubpasses = subpasses.data();
-			renderPassInfo.dependencyCount = (uint32_t)subpassDepends.size();
-			renderPassInfo.pDependencies = subpassDepends.data();
-			renderPass_ = device.GetDevice().createRenderPass(renderPassInfo);
-		}
-
-		return renderPass_.operator bool();
+		return postPass_.InitializeAsColorStandard(device, colorFormat, nullptr);
 	}
 
 	//----
@@ -252,6 +343,14 @@ private:
 		{
 			return false;
 		}
+		if (!vsPost_.CreateFromFile(device, "data/post.vert.spv"))
+		{
+			return false;
+		}
+		if (!psPost_.CreateFromFile(device, "data/post.frag.spv"))
+		{
+			return false;
+		}
 
 		// テクスチャ読み込み
 		if (!texture_.InitializeFromTgaImage(device, initCmdBuffer, texStaging_, "data/icon.tga"))
@@ -259,14 +358,27 @@ private:
 			return false;
 		}
 
+		// サンプラ
+		{
+			vk::SamplerCreateInfo samplerCreateInfo;
+			samplerCreateInfo.magFilter = vk::Filter::eLinear;
+			samplerCreateInfo.minFilter = vk::Filter::eLinear;
+			samplerCreateInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+			samplerCreateInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
+			samplerCreateInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
+			samplerCreateInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
+			samplerCreateInfo.mipLodBias = 0.0f;
+			samplerCreateInfo.compareOp = vk::CompareOp::eNever;
+			samplerCreateInfo.minLod = 0.0f;
+			samplerCreateInfo.maxLod = 0.0f;
+			samplerCreateInfo.maxAnisotropy = 8;
+			samplerCreateInfo.anisotropyEnable = VK_TRUE;
+			samplerCreateInfo.borderColor = vk::BorderColor::eFloatOpaqueWhite;
+			sampler_ = device.GetDevice().createSampler(samplerCreateInfo);
+		}
+
 		// 頂点バッファ
 		{
-			struct Vertex
-			{
-				glm::vec3	pos;
-				glm::vec4	color;
-				glm::vec2	uv;
-			};
 			Vertex vertexData[] = {
 				{ { -0.5f,  0.5f, 0.0f },{ 1.0f, 1.0f, 1.0f, 1.0f },{ 0.0f, 1.0f } },
 				{ { 0.5f,  0.5f, 0.0f },{ 1.0f, 1.0f, 1.0f, 1.0f },{ 1.0f, 1.0f } },
@@ -283,6 +395,23 @@ private:
 			}
 			vbuffer_.CopyFrom(initCmdBuffer, vbStaging_);
 		}
+		{
+			PostVertex vertexData[] = {
+				{ { -0.5f,  0.5f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
+				{ { 0.5f,  0.5f, 0.0f, 1.0f },  { 1.0f, 1.0f } },
+				{ { -0.5f, -0.5f, 0.0f, 1.0f }, { 0.0f, 0.0f } },
+				{ { 0.5f, -0.5f, 0.0f, 1.0f },  { 1.0f, 0.0f } }
+			};
+			if (!pvbStaging_.InitializeAsStaging(device, sizeof(vertexData), vertexData))
+			{
+				return false;
+			}
+			if (!pvbuffer_.InitializeAsVertexBuffer(device, sizeof(vertexData)))
+			{
+				return false;
+			}
+			pvbuffer_.CopyFrom(initCmdBuffer, pvbStaging_);
+		}
 		// インデックスバッファ
 		{
 			uint32_t indexData[] = { 0, 1, 2, 1, 3, 2 };
@@ -296,20 +425,281 @@ private:
 			}
 			ibuffer_.CopyFrom(initCmdBuffer, ibStaging_);
 		}
+		{
+			uint32_t indexData[] = { 0, 1, 2, 1, 3, 2 };
+			if (!pibStaging_.InitializeAsStaging(device, sizeof(indexData), indexData))
+			{
+				return false;
+			}
+			if (!pibuffer_.InitializeAsIndexBuffer(device, sizeof(indexData)))
+			{
+				return false;
+			}
+			pibuffer_.CopyFrom(initCmdBuffer, pibStaging_);
+		}
+
+		// シーン用の定数バッファ
+		{
+			SceneData data;
+			if (!sceneBuffer_.InitializeAsUniformBuffer(device, sizeof(SceneData), &data))
+			{
+				return false;
+			}
+		}
+
+		// デスクリプタセットを生成
+		{
+			// デスクリプタプールを作成する
+			{
+				std::array<vk::DescriptorPoolSize, 2> typeCounts;
+				typeCounts[0].type = vk::DescriptorType::eUniformBuffer;
+				typeCounts[0].descriptorCount = 2;
+				typeCounts[1].type = vk::DescriptorType::eCombinedImageSampler;
+				typeCounts[1].descriptorCount = 2;
+
+				// デスクリプタプールを生成
+				vk::DescriptorPoolCreateInfo descriptorPoolInfo;
+				descriptorPoolInfo.poolSizeCount = static_cast<uint32_t>(typeCounts.size());
+				descriptorPoolInfo.pPoolSizes = typeCounts.data();
+				descriptorPoolInfo.maxSets = 2;
+				descPool_ = device.GetDevice().createDescriptorPool(descriptorPoolInfo);
+			}
+
+			// デスクリプタセットレイアウトを作成する
+			{
+				// 描画時のシェーダセットに対するデスクリプタセットのレイアウトを指定する
+				std::array<vk::DescriptorSetLayoutBinding, 2> layoutBindings;
+				// UniformBuffer for VertexShader
+				layoutBindings[0].descriptorType = vk::DescriptorType::eUniformBuffer;
+				layoutBindings[0].descriptorCount = 1;
+				layoutBindings[0].binding = 0;
+				layoutBindings[0].stageFlags = vk::ShaderStageFlagBits::eVertex;
+				layoutBindings[0].pImmutableSamplers = nullptr;
+				// CombinedImageSampler for PixelShader
+				layoutBindings[1].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+				layoutBindings[1].descriptorCount = 1;
+				layoutBindings[1].binding = 1;
+				layoutBindings[1].stageFlags = vk::ShaderStageFlagBits::eFragment;
+				layoutBindings[1].pImmutableSamplers = nullptr;
+
+				// レイアウトを生成
+				vk::DescriptorSetLayoutCreateInfo descriptorLayout;
+				descriptorLayout.bindingCount = static_cast<uint32_t>(layoutBindings.size());
+				descriptorLayout.pBindings = layoutBindings.data();
+				descLayouts_.push_back(device.GetDevice().createDescriptorSetLayout(descriptorLayout, nullptr));
+			}
+			{
+				// 描画時のシェーダセットに対するデスクリプタセットのレイアウトを指定する
+				// 頂点シェーダ用のUniformBuffer
+				std::array<vk::DescriptorSetLayoutBinding, 1> layoutBindings;
+				// CombinedImageSampler for PixelShader
+				layoutBindings[0].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+				layoutBindings[0].descriptorCount = 1;
+				layoutBindings[0].binding = 1;
+				layoutBindings[0].stageFlags = vk::ShaderStageFlagBits::eFragment;
+				layoutBindings[0].pImmutableSamplers = nullptr;
+
+				// レイアウトを生成
+				vk::DescriptorSetLayoutCreateInfo descriptorLayout;
+				descriptorLayout.bindingCount = static_cast<uint32_t>(layoutBindings.size());
+				descriptorLayout.pBindings = layoutBindings.data();
+				descLayouts_.push_back(device.GetDevice().createDescriptorSetLayout(descriptorLayout, nullptr));
+			}
+
+			// デスクリプタセットを作成する
+			{
+				vk::DescriptorImageInfo texDescInfo(
+					sampler_, texture_.GetView(), vk::ImageLayout::eGeneral);
+
+				vk::DescriptorImageInfo postDescInfo(
+					sampler_, offscreenBuffer_.GetView(), vk::ImageLayout::eGeneral);
+
+				vk::DescriptorBufferInfo dbInfo = sceneBuffer_.GetDescInfo();
+
+				// デスクリプタセットは作成済みのデスクリプタプールから確保する
+				vk::DescriptorSetAllocateInfo allocInfo;
+				allocInfo.descriptorPool = descPool_;
+				allocInfo.descriptorSetCount = static_cast<uint32_t>(descLayouts_.size());
+				allocInfo.pSetLayouts = descLayouts_.data();
+				descSets_ = device.GetDevice().allocateDescriptorSets(allocInfo);
+
+				// デスクリプタセットの情報を更新する
+				std::array<vk::WriteDescriptorSet, 3> descSetInfos{
+					vk::WriteDescriptorSet(descSets_[0], 0, 0, 1, vk::DescriptorType::eUniformBuffer, nullptr, &dbInfo, nullptr),
+					vk::WriteDescriptorSet(descSets_[0], 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &texDescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[1], 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &postDescInfo, nullptr, nullptr),
+				};
+				device.GetDevice().updateDescriptorSets(descSetInfos, nullptr);
+			}
+		}
+
+		return true;
+	}
+
+	bool InitializePipeline(vsl::Device& device)
+	{
+		{
+			// 今回はPushConstantを利用する
+			// 小さなサイズの定数バッファはコマンドバッファに乗せてシェーダに送ることが可能
+			vk::PushConstantRange pushConstantRange(vk::ShaderStageFlagBits::eVertex, 0, sizeof(MeshData));
+
+			// デスクリプタセットレイアウトに対応したパイプラインレイアウトを生成する
+			// 通常は1対1で生成するのかな？
+			vk::PipelineLayoutCreateInfo pPipelineLayoutCreateInfo;
+			pPipelineLayoutCreateInfo.setLayoutCount = 1;
+			pPipelineLayoutCreateInfo.pSetLayouts = &descLayouts_[0];
+			pPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+			pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
+			pipeLayout_ = device.GetDevice().createPipelineLayout(pPipelineLayoutCreateInfo);
+		}
+
+		// 描画トポロジの設定
+		vk::PipelineInputAssemblyStateCreateInfo inputAssemblyState;
+		inputAssemblyState.topology = vk::PrimitiveTopology::eTriangleList;
+
+		// ラスタライズステートの設定
+		vk::PipelineRasterizationStateCreateInfo rasterizationState;
+		rasterizationState.polygonMode = vk::PolygonMode::eFill;
+		rasterizationState.cullMode = vk::CullModeFlagBits::eNone;
+		rasterizationState.frontFace = vk::FrontFace::eCounterClockwise;
+		rasterizationState.depthClampEnable = VK_FALSE;
+		rasterizationState.rasterizerDiscardEnable = VK_FALSE;
+		rasterizationState.depthBiasEnable = VK_FALSE;
+		rasterizationState.lineWidth = 1.0f;
+
+		// ブレンドモードの設定
+		vk::PipelineColorBlendStateCreateInfo colorBlendState;
+		vk::PipelineColorBlendAttachmentState blendAttachmentState[1] = {};
+		blendAttachmentState[0].colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+		blendAttachmentState[0].blendEnable = VK_TRUE;
+		blendAttachmentState[0].colorBlendOp = vk::BlendOp::eAdd;
+		blendAttachmentState[0].srcColorBlendFactor = vk::BlendFactor::eSrcAlpha;
+		blendAttachmentState[0].dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
+		blendAttachmentState[0].alphaBlendOp = vk::BlendOp::eAdd;
+		blendAttachmentState[0].srcAlphaBlendFactor = vk::BlendFactor::eOne;
+		blendAttachmentState[0].dstAlphaBlendFactor = vk::BlendFactor::eZero;
+		colorBlendState.attachmentCount = ARRAYSIZE(blendAttachmentState);
+		colorBlendState.pAttachments = blendAttachmentState;
+
+		// Viewportステートの設定
+		vk::PipelineViewportStateCreateInfo viewportState;
+		viewportState.viewportCount = 1;
+		viewportState.scissorCount = 1;
+
+		// DynamicStateを利用してViewportとScissorBoxを変更できるようにしておく
+		vk::PipelineDynamicStateCreateInfo dynamicState;
+		std::vector<vk::DynamicState> dynamicStateEnables;
+		dynamicStateEnables.push_back(vk::DynamicState::eViewport);
+		dynamicStateEnables.push_back(vk::DynamicState::eScissor);
+		dynamicState.pDynamicStates = dynamicStateEnables.data();
+		dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStateEnables.size());
+
+		// DepthStensilステートの設定
+		vk::PipelineDepthStencilStateCreateInfo depthStencilState;
+		depthStencilState.depthTestEnable = VK_TRUE;
+		depthStencilState.depthWriteEnable = VK_TRUE;
+		depthStencilState.depthCompareOp = vk::CompareOp::eLessOrEqual;
+		depthStencilState.depthBoundsTestEnable = VK_FALSE;
+		depthStencilState.back.failOp = vk::StencilOp::eKeep;
+		depthStencilState.back.passOp = vk::StencilOp::eKeep;
+		depthStencilState.back.compareOp = vk::CompareOp::eAlways;
+		depthStencilState.stencilTestEnable = VK_FALSE;
+		depthStencilState.front = depthStencilState.back;
+
+		// マルチサンプルステート
+		vk::PipelineMultisampleStateCreateInfo multisampleState;
+		multisampleState.pSampleMask = NULL;
+		multisampleState.rasterizationSamples = vk::SampleCountFlagBits::e1;
+
+		// シェーダ設定
+		std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages;
+		shaderStages[0].stage = vk::ShaderStageFlagBits::eVertex;
+		shaderStages[0].module = vsTest_.GetModule();
+		shaderStages[0].pName = "main";
+		shaderStages[1].stage = vk::ShaderStageFlagBits::eFragment;
+		shaderStages[1].module = psTest_.GetModule();
+		shaderStages[1].pName = "main";
+
+		// 頂点入力
+		std::array<vk::VertexInputBindingDescription, 1> bindDescs;
+		bindDescs[0].binding = 0;		// 0番へバインド
+		bindDescs[0].stride = sizeof(Vertex);
+		bindDescs[0].inputRate = vk::VertexInputRate::eVertex;
+
+		std::array<vk::VertexInputAttributeDescription, 3> attribDescs;
+		// Position
+		attribDescs[0].binding = 0;
+		attribDescs[0].location = 0;
+		attribDescs[0].format = vk::Format::eR32G32B32Sfloat;
+		attribDescs[0].offset = 0;
+		// Color
+		attribDescs[1].binding = 0;
+		attribDescs[1].location = 1;
+		attribDescs[1].format = vk::Format::eR32G32B32A32Sfloat;
+		attribDescs[1].offset = sizeof(glm::vec3);
+		// UV
+		attribDescs[2].binding = 0;
+		attribDescs[2].location = 2;
+		attribDescs[2].format = vk::Format::eR32G32Sfloat;
+		attribDescs[2].offset = attribDescs[1].offset + sizeof(glm::vec4);
+
+		vk::PipelineVertexInputStateCreateInfo vinputState;
+		vinputState.vertexBindingDescriptionCount = static_cast<uint32_t>(bindDescs.size());
+		vinputState.pVertexBindingDescriptions = bindDescs.data();
+		vinputState.vertexAttributeDescriptionCount = static_cast<uint32_t>(attribDescs.size());
+		vinputState.pVertexAttributeDescriptions = attribDescs.data();
+
+		// パイプライン情報に各種ステートを設定して生成
+		vk::GraphicsPipelineCreateInfo pipelineCreateInfo;
+		pipelineCreateInfo.layout = pipeLayout_;
+		pipelineCreateInfo.renderPass = meshPass_.GetPass();
+		pipelineCreateInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+		pipelineCreateInfo.pStages = shaderStages.data();
+		pipelineCreateInfo.pVertexInputState = &vinputState;
+		pipelineCreateInfo.pInputAssemblyState = &inputAssemblyState;
+		pipelineCreateInfo.pRasterizationState = &rasterizationState;
+		pipelineCreateInfo.pColorBlendState = &colorBlendState;
+		pipelineCreateInfo.pMultisampleState = &multisampleState;
+		pipelineCreateInfo.pViewportState = &viewportState;
+		pipelineCreateInfo.pDepthStencilState = &depthStencilState;
+		pipelineCreateInfo.pDynamicState = &dynamicState;
+
+		pipeline_ = device.GetDevice().createGraphicsPipelines(device.GetPipelineCache(), pipelineCreateInfo, nullptr)[0];
+		if (!pipeline_)
+		{
+			return false;
+		}
 
 		return true;
 	}
 
 private:
-	vk::RenderPass	renderPass_;
+	vsl::RenderPass	renderPass_;
+	vsl::RenderPass	meshPass_, postPass_;
 	vsl::Image		depthBuffer_;
+	vsl::Image		offscreenBuffer_;
 	std::vector<vk::Framebuffer>	frameBuffers_;
+	vk::Framebuffer	offscreenFrame_;
 
 	vsl::Shader		vsTest_, psTest_;
+	vsl::Shader		vsPost_, psPost_;
 	vsl::Buffer		vbuffer_, ibuffer_;
+	vsl::Buffer		pvbuffer_, pibuffer_;
+	vsl::Buffer		sceneBuffer_;
 	vsl::Image		texture_;
+	vk::Sampler		sampler_;
 
-	vsl::Buffer		vbStaging_, ibStaging_, texStaging_;
+	vk::DescriptorPool						descPool_;
+	std::vector<vk::DescriptorSetLayout>	descLayouts_;
+	std::vector<vk::DescriptorSet>			descSets_;
+
+	vk::PipelineLayout	pipeLayout_;
+	vk::Pipeline		pipeline_;
+
+	vk::PipelineLayout	postPipeLayout_;
+	vk::Pipeline		postPipeline_;
+
+	vsl::Buffer		vbStaging_, ibStaging_, pvbStaging_, pibStaging_, texStaging_;
 };	// class MySample
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow)

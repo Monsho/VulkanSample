@@ -20,6 +20,12 @@ namespace vsl
 			Destroy();
 		}
 
+		bool InitializeAsColorBuffer(
+			Device& owner,
+			vk::CommandBuffer& cmdBuff,
+			vk::Format format,
+			uint16_t width, uint16_t height,
+			uint16_t mipLevels = 1, uint16_t arrayLayers = 1);
 		bool InitializeAsDepthStencilBuffer(
 			Device& owner,
 			vk::CommandBuffer& cmdBuff,
