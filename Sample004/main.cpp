@@ -63,10 +63,6 @@ public:
 	bool Initialize(vsl::Device& device)
 	{
 		// レンダーパスの初期化
-		if (!InitializeRenderPass(device))
-		{
-			return false;
-		}
 		if (!InitializeMeshPass(device))
 		{
 			return false;
@@ -100,11 +96,10 @@ public:
 
 		// フレームバッファ設定
 		{
-			std::array<vk::ImageView, 2> views;
-			views[1] = depthBuffer_.GetView();
+			std::array<vk::ImageView, 1> views;
 
 			vk::FramebufferCreateInfo framebufferCreateInfo;
-			framebufferCreateInfo.renderPass = renderPass_.GetPass();
+			framebufferCreateInfo.renderPass = postPass_.GetPass();
 			framebufferCreateInfo.attachmentCount = static_cast<uint32_t>(views.size());
 			framebufferCreateInfo.pAttachments = views.data();
 			framebufferCreateInfo.width = kScreenWidth;
@@ -151,11 +146,13 @@ public:
 		texStaging_.Destroy();
 		vbStaging_.Destroy();
 		ibStaging_.Destroy();
-		pvbStaging_.Destroy();
-		pibStaging_.Destroy();
 
 		// パイプラインの初期化
 		if (!InitializePipeline(device))
+		{
+			return false;
+		}
+		if (!InitializePostPipeline(device))
 		{
 			return false;
 		}
@@ -222,7 +219,7 @@ public:
 			offscreenBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eColorAttachmentOptimal, colorSubRange);
 		}
 
-		// 描画パス開始
+		// メッシュパス開始
 		vk::RenderPassBeginInfo renderPassBeginInfo;
 		renderPassBeginInfo.renderPass = meshPass_.GetPass();
 		renderPassBeginInfo.renderArea.extent = vk::Extent2D(kScreenWidth, kScreenHeight);
@@ -258,6 +255,33 @@ public:
 		}
 		cmdBuffer.endRenderPass();
 
+		// オフスクリーンバッファのレイアウト変更
+		{
+			vk::ImageSubresourceRange colorSubRange;
+			colorSubRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+			colorSubRange.levelCount = 1;
+			colorSubRange.layerCount = 1;
+
+			offscreenBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eShaderReadOnlyOptimal, colorSubRange);
+		}
+
+		// ポストパス開始
+		renderPassBeginInfo.renderPass = postPass_.GetPass();
+		renderPassBeginInfo.renderArea.extent = vk::Extent2D(kScreenWidth, kScreenHeight);
+		renderPassBeginInfo.clearValueCount = 0;
+		renderPassBeginInfo.pClearValues = nullptr;
+		renderPassBeginInfo.framebuffer = frameBuffers_[currentIndex];
+		cmdBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
+		{
+			// 各リソース等のバインド
+			vk::DeviceSize offsets = 0;
+			cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, postPipeLayout_, 0, descSets_[1], nullptr);
+			cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, postPipeline_);
+
+			cmdBuffer.draw(4, 1, 0, 0);
+		}
+		cmdBuffer.endRenderPass();
+
 		device.ReadyPresentAndEndMainCommandBuffer();
 		device.SubmitAndPresent();
 
@@ -269,6 +293,8 @@ public:
 	{
 		vk::Device& d = device.GetDevice();
 
+		d.destroyPipeline(postPipeline_);
+		d.destroyPipelineLayout(postPipeLayout_);
 		d.destroyPipeline(pipeline_);
 		d.destroyPipelineLayout(pipeLayout_);
 
@@ -288,8 +314,6 @@ public:
 
 		vbuffer_.Destroy();
 		ibuffer_.Destroy();
-		pvbuffer_.Destroy();
-		pibuffer_.Destroy();
 		sceneBuffer_.Destroy();
 
 		d.destroyFramebuffer(offscreenFrame_);
@@ -299,7 +323,6 @@ public:
 		}
 		offscreenBuffer_.Destroy();
 		depthBuffer_.Destroy();
-		renderPass_.Destroy();
 		meshPass_.Destroy();
 		postPass_.Destroy();
 
@@ -307,14 +330,6 @@ public:
 	}
 
 private:
-	//----
-	bool InitializeRenderPass(vsl::Device& device)
-	{
-		vk::Format colorFormat = device.GetSwapchain().GetFormat();
-		vk::Format depthFormat = vk::Format::eD32SfloatS8Uint;
-
-		return renderPass_.InitializeAsColorStandard(device, colorFormat, depthFormat);
-	}
 	//----
 	bool InitializeMeshPass(vsl::Device& device)
 	{
@@ -395,23 +410,6 @@ private:
 			}
 			vbuffer_.CopyFrom(initCmdBuffer, vbStaging_);
 		}
-		{
-			PostVertex vertexData[] = {
-				{ { -0.5f,  0.5f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
-				{ { 0.5f,  0.5f, 0.0f, 1.0f },  { 1.0f, 1.0f } },
-				{ { -0.5f, -0.5f, 0.0f, 1.0f }, { 0.0f, 0.0f } },
-				{ { 0.5f, -0.5f, 0.0f, 1.0f },  { 1.0f, 0.0f } }
-			};
-			if (!pvbStaging_.InitializeAsStaging(device, sizeof(vertexData), vertexData))
-			{
-				return false;
-			}
-			if (!pvbuffer_.InitializeAsVertexBuffer(device, sizeof(vertexData)))
-			{
-				return false;
-			}
-			pvbuffer_.CopyFrom(initCmdBuffer, pvbStaging_);
-		}
 		// インデックスバッファ
 		{
 			uint32_t indexData[] = { 0, 1, 2, 1, 3, 2 };
@@ -424,18 +422,6 @@ private:
 				return false;
 			}
 			ibuffer_.CopyFrom(initCmdBuffer, ibStaging_);
-		}
-		{
-			uint32_t indexData[] = { 0, 1, 2, 1, 3, 2 };
-			if (!pibStaging_.InitializeAsStaging(device, sizeof(indexData), indexData))
-			{
-				return false;
-			}
-			if (!pibuffer_.InitializeAsIndexBuffer(device, sizeof(indexData)))
-			{
-				return false;
-			}
-			pibuffer_.CopyFrom(initCmdBuffer, pibStaging_);
 		}
 
 		// シーン用の定数バッファ
@@ -673,8 +659,112 @@ private:
 		return true;
 	}
 
+	bool InitializePostPipeline(vsl::Device& device)
+	{
+		{
+			// デスクリプタセットレイアウトに対応したパイプラインレイアウトを生成する
+			// 通常は1対1で生成するのかな？
+			vk::PipelineLayoutCreateInfo pPipelineLayoutCreateInfo;
+			pPipelineLayoutCreateInfo.setLayoutCount = 1;
+			pPipelineLayoutCreateInfo.pSetLayouts = &descLayouts_[1];
+			postPipeLayout_ = device.GetDevice().createPipelineLayout(pPipelineLayoutCreateInfo);
+		}
+
+		// 描画トポロジの設定
+		vk::PipelineInputAssemblyStateCreateInfo inputAssemblyState;
+		inputAssemblyState.topology = vk::PrimitiveTopology::eTriangleStrip;
+
+		// ラスタライズステートの設定
+		vk::PipelineRasterizationStateCreateInfo rasterizationState;
+		rasterizationState.polygonMode = vk::PolygonMode::eFill;
+		rasterizationState.cullMode = vk::CullModeFlagBits::eNone;
+		rasterizationState.frontFace = vk::FrontFace::eCounterClockwise;
+		rasterizationState.depthClampEnable = VK_FALSE;
+		rasterizationState.rasterizerDiscardEnable = VK_FALSE;
+		rasterizationState.depthBiasEnable = VK_FALSE;
+		rasterizationState.lineWidth = 1.0f;
+
+		// ブレンドモードの設定
+		vk::PipelineColorBlendStateCreateInfo colorBlendState;
+		vk::PipelineColorBlendAttachmentState blendAttachmentState[1] = {};
+		blendAttachmentState[0].colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+		blendAttachmentState[0].blendEnable = VK_TRUE;
+		blendAttachmentState[0].colorBlendOp = vk::BlendOp::eAdd;
+		blendAttachmentState[0].srcColorBlendFactor = vk::BlendFactor::eSrcAlpha;
+		blendAttachmentState[0].dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
+		blendAttachmentState[0].alphaBlendOp = vk::BlendOp::eAdd;
+		blendAttachmentState[0].srcAlphaBlendFactor = vk::BlendFactor::eOne;
+		blendAttachmentState[0].dstAlphaBlendFactor = vk::BlendFactor::eZero;
+		colorBlendState.attachmentCount = ARRAYSIZE(blendAttachmentState);
+		colorBlendState.pAttachments = blendAttachmentState;
+
+		// Viewportステートの設定
+		vk::PipelineViewportStateCreateInfo viewportState;
+		viewportState.viewportCount = 1;
+		viewportState.scissorCount = 1;
+
+		// DynamicStateを利用してViewportとScissorBoxを変更できるようにしておく
+		vk::PipelineDynamicStateCreateInfo dynamicState;
+		std::vector<vk::DynamicState> dynamicStateEnables;
+		dynamicStateEnables.push_back(vk::DynamicState::eViewport);
+		dynamicStateEnables.push_back(vk::DynamicState::eScissor);
+		dynamicState.pDynamicStates = dynamicStateEnables.data();
+		dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStateEnables.size());
+
+		// DepthStensilステートの設定
+		vk::PipelineDepthStencilStateCreateInfo depthStencilState;
+		depthStencilState.depthTestEnable = VK_TRUE;
+		depthStencilState.depthWriteEnable = VK_TRUE;
+		depthStencilState.depthCompareOp = vk::CompareOp::eLessOrEqual;
+		depthStencilState.depthBoundsTestEnable = VK_FALSE;
+		depthStencilState.back.failOp = vk::StencilOp::eKeep;
+		depthStencilState.back.passOp = vk::StencilOp::eKeep;
+		depthStencilState.back.compareOp = vk::CompareOp::eAlways;
+		depthStencilState.stencilTestEnable = VK_FALSE;
+		depthStencilState.front = depthStencilState.back;
+
+		// マルチサンプルステート
+		vk::PipelineMultisampleStateCreateInfo multisampleState;
+		multisampleState.pSampleMask = NULL;
+		multisampleState.rasterizationSamples = vk::SampleCountFlagBits::e1;
+
+		// シェーダ設定
+		std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages;
+		shaderStages[0].stage = vk::ShaderStageFlagBits::eVertex;
+		shaderStages[0].module = vsPost_.GetModule();
+		shaderStages[0].pName = "main";
+		shaderStages[1].stage = vk::ShaderStageFlagBits::eFragment;
+		shaderStages[1].module = psPost_.GetModule();
+		shaderStages[1].pName = "main";
+
+		// 頂点入力
+		vk::PipelineVertexInputStateCreateInfo vinputState;
+
+		// パイプライン情報に各種ステートを設定して生成
+		vk::GraphicsPipelineCreateInfo pipelineCreateInfo;
+		pipelineCreateInfo.layout = postPipeLayout_;
+		pipelineCreateInfo.renderPass = postPass_.GetPass();
+		pipelineCreateInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+		pipelineCreateInfo.pStages = shaderStages.data();
+		pipelineCreateInfo.pVertexInputState = &vinputState;
+		pipelineCreateInfo.pInputAssemblyState = &inputAssemblyState;
+		pipelineCreateInfo.pRasterizationState = &rasterizationState;
+		pipelineCreateInfo.pColorBlendState = &colorBlendState;
+		pipelineCreateInfo.pMultisampleState = &multisampleState;
+		pipelineCreateInfo.pViewportState = &viewportState;
+		pipelineCreateInfo.pDepthStencilState = &depthStencilState;
+		pipelineCreateInfo.pDynamicState = &dynamicState;
+
+		postPipeline_ = device.GetDevice().createGraphicsPipelines(device.GetPipelineCache(), pipelineCreateInfo, nullptr)[0];
+		if (!postPipeline_)
+		{
+			return false;
+		}
+
+		return true;
+	}
+
 private:
-	vsl::RenderPass	renderPass_;
 	vsl::RenderPass	meshPass_, postPass_;
 	vsl::Image		depthBuffer_;
 	vsl::Image		offscreenBuffer_;
@@ -684,7 +774,6 @@ private:
 	vsl::Shader		vsTest_, psTest_;
 	vsl::Shader		vsPost_, psPost_;
 	vsl::Buffer		vbuffer_, ibuffer_;
-	vsl::Buffer		pvbuffer_, pibuffer_;
 	vsl::Buffer		sceneBuffer_;
 	vsl::Image		texture_;
 	vk::Sampler		sampler_;
@@ -699,7 +788,7 @@ private:
 	vk::PipelineLayout	postPipeLayout_;
 	vk::Pipeline		postPipeline_;
 
-	vsl::Buffer		vbStaging_, ibStaging_, pvbStaging_, pibStaging_, texStaging_;
+	vsl::Buffer		vbStaging_, ibStaging_, texStaging_;
 };	// class MySample
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow)
