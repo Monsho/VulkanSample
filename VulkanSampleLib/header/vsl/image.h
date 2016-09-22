@@ -45,6 +45,8 @@ namespace vsl
 		// getter
 		vk::Image&		GetImage()			{ return image_; }
 		vk::ImageView&	GetView()			{ return view_; }
+		vk::ImageView&	GetDepthView()		{ return depthView_; }
+		vk::ImageView&	GetStencilView()	{ return stencilView_; }
 		vk::Format		GetFormat()	const	{ return format_; }
 		uint16_t		GetWidth()	const	{ return width_; }
 		uint16_t		GetHeight()	const	{ return height_; }
@@ -54,7 +56,7 @@ namespace vsl
 
 		vk::Image			image_;
 		vk::DeviceMemory	devMem_;
-		vk::ImageView		view_;
+		vk::ImageView		view_, depthView_, stencilView_;
 		vk::Format			format_{ vk::Format::eUndefined };
 		uint16_t			width_{ 0 }, height_{ 0 };
 		vk::ImageLayout		currentLayout_{ vk::ImageLayout::eUndefined };

@@ -131,7 +131,7 @@ namespace vsl
 		imageCreateInfo.format = format;
 		imageCreateInfo.mipLevels = mipLevels;
 		imageCreateInfo.arrayLayers = arrayLayers;
-		imageCreateInfo.usage = vk::ImageUsageFlagBits::eDepthStencilAttachment;
+		imageCreateInfo.usage = vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled;
 		image_ = device.createImage(imageCreateInfo);
 		if (!image_)
 		{
@@ -163,6 +163,29 @@ namespace vsl
 		if (!view_)
 		{
 			return false;
+		}
+
+		// テクスチャとして使用する際のViewを作成
+		if (aspect == vk::ImageAspectFlagBits::eDepth)
+		{
+			depthView_ = view_;
+		}
+		else if (aspect == vk::ImageAspectFlagBits::eStencil)
+		{
+			stencilView_ = view_;
+		}
+		else
+		{
+			viewCreateInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
+			depthView_ = device.createImageView(viewCreateInfo);
+
+			viewCreateInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eStencil;
+			stencilView_ = device.createImageView(viewCreateInfo);
+
+			if (!depthView_ || !stencilView_)
+			{
+				return false;
+			}
 		}
 
 		// レイアウト変更のコマンドを発行する
@@ -312,6 +335,8 @@ end:
 		if (pOwner_)
 		{
 			vk::Device& device = pOwner_->GetDevice();
+			if (stencilView_ && view_ != stencilView_) { device.destroyImageView(stencilView_); stencilView_ = vk::ImageView(); }
+			if (depthView_ && view_ != depthView_) { device.destroyImageView(depthView_); depthView_ = vk::ImageView(); }
 			if (view_) { device.destroyImageView(view_); view_ = vk::ImageView(); }
 			if (image_) { device.destroyImage(image_); image_ = vk::Image(); }
 			if (devMem_) { device.freeMemory(devMem_); devMem_ = vk::DeviceMemory(); }

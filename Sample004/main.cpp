@@ -264,6 +264,14 @@ public:
 
 			offscreenBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eShaderReadOnlyOptimal, colorSubRange);
 		}
+		{
+			vk::ImageSubresourceRange depthSubRange;
+			depthSubRange.aspectMask = vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil;
+			depthSubRange.levelCount = 1;
+			depthSubRange.layerCount = 1;
+
+			depthBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eShaderReadOnlyOptimal, depthSubRange);
+		}
 
 		// ポストパス開始
 		renderPassBeginInfo.renderPass = postPass_.GetPass();
@@ -441,7 +449,7 @@ private:
 				typeCounts[0].type = vk::DescriptorType::eUniformBuffer;
 				typeCounts[0].descriptorCount = 2;
 				typeCounts[1].type = vk::DescriptorType::eCombinedImageSampler;
-				typeCounts[1].descriptorCount = 2;
+				typeCounts[1].descriptorCount = 3;
 
 				// デスクリプタプールを生成
 				vk::DescriptorPoolCreateInfo descriptorPoolInfo;
@@ -476,14 +484,19 @@ private:
 			}
 			{
 				// 描画時のシェーダセットに対するデスクリプタセットのレイアウトを指定する
-				// 頂点シェーダ用のUniformBuffer
-				std::array<vk::DescriptorSetLayoutBinding, 1> layoutBindings;
-				// CombinedImageSampler for PixelShader
+				std::array<vk::DescriptorSetLayoutBinding, 2> layoutBindings;
+				// CombinedImageSampler (Color buffer) for PixelShader
 				layoutBindings[0].descriptorType = vk::DescriptorType::eCombinedImageSampler;
 				layoutBindings[0].descriptorCount = 1;
 				layoutBindings[0].binding = 1;
 				layoutBindings[0].stageFlags = vk::ShaderStageFlagBits::eFragment;
 				layoutBindings[0].pImmutableSamplers = nullptr;
+				// CombinedImageSampler (Depth buffer) for PixelShader
+				layoutBindings[1].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+				layoutBindings[1].descriptorCount = 1;
+				layoutBindings[1].binding = 2;
+				layoutBindings[1].stageFlags = vk::ShaderStageFlagBits::eFragment;
+				layoutBindings[1].pImmutableSamplers = nullptr;
 
 				// レイアウトを生成
 				vk::DescriptorSetLayoutCreateInfo descriptorLayout;
@@ -500,6 +513,9 @@ private:
 				vk::DescriptorImageInfo postDescInfo(
 					sampler_, offscreenBuffer_.GetView(), vk::ImageLayout::eGeneral);
 
+				vk::DescriptorImageInfo postDepthDescInfo(
+					sampler_, depthBuffer_.GetDepthView(), vk::ImageLayout::eGeneral);
+
 				vk::DescriptorBufferInfo dbInfo = sceneBuffer_.GetDescInfo();
 
 				// デスクリプタセットは作成済みのデスクリプタプールから確保する
@@ -510,10 +526,11 @@ private:
 				descSets_ = device.GetDevice().allocateDescriptorSets(allocInfo);
 
 				// デスクリプタセットの情報を更新する
-				std::array<vk::WriteDescriptorSet, 3> descSetInfos{
+				std::array<vk::WriteDescriptorSet, 4> descSetInfos{
 					vk::WriteDescriptorSet(descSets_[0], 0, 0, 1, vk::DescriptorType::eUniformBuffer, nullptr, &dbInfo, nullptr),
 					vk::WriteDescriptorSet(descSets_[0], 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &texDescInfo, nullptr, nullptr),
 					vk::WriteDescriptorSet(descSets_[1], 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &postDescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[1], 2, 0, 1, vk::DescriptorType::eCombinedImageSampler, &postDepthDescInfo, nullptr, nullptr),
 				};
 				device.GetDevice().updateDescriptorSets(descSetInfos, nullptr);
 			}
