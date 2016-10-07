@@ -216,15 +216,11 @@ namespace vsl
 		Buffer& staging,
 		const std::string& filename)
 	{
-		pOwner_ = &owner;
-
 		tga_image tgaImage;
 		if (tga_read(&tgaImage, filename.c_str()) != TGA_NOERR)
 		{
 			return false;
 		}
-		width_ = tgaImage.width;
-		height_ = tgaImage.height;
 
 		vk::Device& device = owner.GetDevice();
 		bool ret = false;
@@ -236,22 +232,50 @@ namespace vsl
 			goto end;
 		}
 
+		if (!InitializeFromStaging(owner, cmdBuff, staging, vk::Format::eB8G8R8A8Unorm, tgaImage.width, tgaImage.height))
+		{
+			goto end;
+		}
+
+		ret = true;
+end:
+		tga_free_buffers(&tgaImage);
+
+		return ret;
+	}
+
+	//----
+	bool Image::InitializeFromStaging(
+		Device& owner,
+		vk::CommandBuffer& cmdBuff,
+		Buffer& staging,
+		vk::Format format,
+		uint32_t width, uint32_t height,
+		uint16_t mipLevels, uint16_t arrayLayers)
+	{
+		pOwner_ = &owner;
+
+		format_ = format;
+		width_ = width;
+		height_ = height;
+
+		vk::Device& device = owner.GetDevice();
+		bool ret = false;
+
 		// イメージ生成
 		{
-			format_ = vk::Format::eB8G8R8A8Unorm;
-
 			vk::ImageCreateInfo imageCreateInfo;
 			imageCreateInfo.imageType = vk::ImageType::e2D;
-			imageCreateInfo.arrayLayers = 1;
-			imageCreateInfo.mipLevels = 1;
+			imageCreateInfo.arrayLayers = arrayLayers;
+			imageCreateInfo.mipLevels = mipLevels;
 			imageCreateInfo.format = format_;
-			imageCreateInfo.extent = vk::Extent3D(tgaImage.width, tgaImage.height, 1);
+			imageCreateInfo.extent = vk::Extent3D(width, height, 1);
 			imageCreateInfo.usage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst;
 			imageCreateInfo.initialLayout = vk::ImageLayout::ePreinitialized;
 			image_ = device.createImage(imageCreateInfo);
 			if (!image_)
 			{
-				goto end;
+				return false;
 			}
 
 			vk::MemoryRequirements memReqs = device.getImageMemoryRequirements(image_);
@@ -261,7 +285,7 @@ namespace vsl
 			devMem_ = device.allocateMemory(memAllocInfo);
 			if (!devMem_)
 			{
-				goto end;
+				return false;
 			}
 			device.bindImageMemory(image_, devMem_, 0);
 		}
@@ -275,13 +299,13 @@ namespace vsl
 			viewCreateInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
 			viewCreateInfo.subresourceRange.baseMipLevel = 0;
 			viewCreateInfo.subresourceRange.baseArrayLayer = 0;
-			viewCreateInfo.subresourceRange.layerCount = 1;
-			viewCreateInfo.subresourceRange.levelCount = 1;
+			viewCreateInfo.subresourceRange.layerCount = arrayLayers;
+			viewCreateInfo.subresourceRange.levelCount = mipLevels;
 			viewCreateInfo.image = image_;
 			view_ = device.createImageView(viewCreateInfo);
 			if (!view_)
 			{
-				goto end;
+				return false;
 			}
 		}
 
@@ -289,8 +313,8 @@ namespace vsl
 		{
 			vk::ImageSubresourceRange subresourceRange;
 			subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-			subresourceRange.levelCount = 1;
-			subresourceRange.layerCount = 1;
+			subresourceRange.levelCount = arrayLayers;
+			subresourceRange.layerCount = mipLevels;
 
 			// レイアウト設定
 			Image::SetImageLayout(
@@ -303,10 +327,10 @@ namespace vsl
 			// コピーコマンド
 			vk::BufferImageCopy bufferCopyRegion;
 			bufferCopyRegion.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
-			bufferCopyRegion.imageSubresource.layerCount = 1;
+			bufferCopyRegion.imageSubresource.layerCount = arrayLayers;
 			bufferCopyRegion.imageExtent.depth = 1;
-			bufferCopyRegion.imageExtent.width = tgaImage.width;
-			bufferCopyRegion.imageExtent.height = tgaImage.height;
+			bufferCopyRegion.imageExtent.width = width;
+			bufferCopyRegion.imageExtent.height = height;
 			bufferCopyRegion.imageSubresource.mipLevel = 0;
 			bufferCopyRegion.bufferOffset = 0;
 			cmdBuff.copyBufferToImage(staging.GetBuffer(), image_, vk::ImageLayout::eTransferDstOptimal, 1, &bufferCopyRegion);
@@ -322,11 +346,7 @@ namespace vsl
 			currentLayout_ = vk::ImageLayout::eShaderReadOnlyOptimal;
 		}
 
-		ret = true;
-end:
-		tga_free_buffers(&tgaImage);
-
-		return ret;
+		return true;
 	}
 
 	//----

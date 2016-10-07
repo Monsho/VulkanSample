@@ -5,7 +5,7 @@
 namespace vsl
 {
 	//----
-	bool Buffer::InitializeCommon(Device& owner, size_t size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memProp, void* pData)
+	bool Buffer::InitializeCommon(Device& owner, size_t size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memProp, const void* pData)
 	{
 		pOwner_ = &owner;
 		size_ = size;
@@ -47,7 +47,7 @@ namespace vsl
 	}
 
 	//----
-	bool Buffer::InitializeAsStaging(Device& owner, size_t size, void* pData)
+	bool Buffer::InitializeAsStaging(Device& owner, size_t size, const void* pData)
 	{
 		return InitializeCommon(owner, size, vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eHostVisible, pData);
 	}
@@ -65,7 +65,7 @@ namespace vsl
 	}
 
 	//----
-	bool Buffer::InitializeAsUniformBuffer(Device& owner, size_t size, void* pData)
+	bool Buffer::InitializeAsUniformBuffer(Device& owner, size_t size, const void* pData)
 	{
 		return InitializeCommon(owner, size, vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eHostVisible, pData);
 	}

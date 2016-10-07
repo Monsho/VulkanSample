@@ -9,6 +9,7 @@
 #include <vsl/buffer.h>
 #include <vsl/shader.h>
 #include <vsl/render_pass.h>
+#include <imgui.h>
 
 
 namespace

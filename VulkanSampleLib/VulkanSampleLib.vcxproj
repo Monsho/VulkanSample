@@ -79,9 +79,16 @@
     <Text Include="ReadMe.txt" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\imgui\imconfig.h" />
+    <ClInclude Include="..\imgui\imgui.h" />
+    <ClInclude Include="..\imgui\imgui_internal.h" />
+    <ClInclude Include="..\imgui\stb_rect_pack.h" />
+    <ClInclude Include="..\imgui\stb_textedit.h" />
+    <ClInclude Include="..\imgui\stb_truetype.h" />
     <ClInclude Include="header\vsl\application.h" />
     <ClInclude Include="header\vsl\buffer.h" />
     <ClInclude Include="header\vsl\device.h" />
+    <ClInclude Include="header\vsl\gui.h" />
     <ClInclude Include="header\vsl\image.h" />
     <ClInclude Include="header\vsl\render_pass.h" />
     <ClInclude Include="header\vsl\shader.h" />
@@ -89,9 +96,13 @@
     <ClInclude Include="header\vsl\targa.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\imgui\imgui.cpp" />
+    <ClCompile Include="..\imgui\imgui_demo.cpp" />
+    <ClCompile Include="..\imgui\imgui_draw.cpp" />
     <ClCompile Include="source\application.cpp" />
     <ClCompile Include="source\buffer.cpp" />
     <ClCompile Include="source\device.cpp" />
+    <ClCompile Include="source\gui.cpp" />
     <ClCompile Include="source\image.cpp" />
     <ClCompile Include="source\render_pass.cpp" />
     <ClCompile Include="source\shader.cpp" />

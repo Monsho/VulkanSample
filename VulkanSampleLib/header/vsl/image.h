@@ -37,6 +37,13 @@ namespace vsl
 			vk::CommandBuffer& cmdBuff,
 			Buffer& staging,
 			const std::string& filename);
+		bool InitializeFromStaging(
+			Device& owner,
+			vk::CommandBuffer& cmdBuff,
+			Buffer& staging,
+			vk::Format format,
+			uint32_t width, uint32_t height,
+			uint16_t mipLevels = 1, uint16_t arrayLayers = 1);
 
 		void Destroy();
 

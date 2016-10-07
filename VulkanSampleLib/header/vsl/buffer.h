@@ -19,10 +19,10 @@ namespace vsl
 			Destroy();
 		}
 
-		bool InitializeAsStaging(Device& owner, size_t size, void* pData = nullptr);
+		bool InitializeAsStaging(Device& owner, size_t size, const void* pData = nullptr);
 		bool InitializeAsVertexBuffer(Device& owner, size_t size);
 		bool InitializeAsIndexBuffer(Device& owner, size_t size);
-		bool InitializeAsUniformBuffer(Device& owner, size_t size, void* pData = nullptr);
+		bool InitializeAsUniformBuffer(Device& owner, size_t size, const void* pData = nullptr);
 
 		void Destroy();
 
@@ -37,7 +37,7 @@ namespace vsl
 		vk::Buffer& GetBuffer() { return buffer_; }
 
 	private:
-		bool InitializeCommon(Device& owner, size_t size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memProp, void* pData = nullptr);
+		bool InitializeCommon(Device& owner, size_t size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memProp, const void* pData = nullptr);
 
 	private:
 		Device*		pOwner_{ nullptr };
