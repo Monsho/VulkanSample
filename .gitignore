@@ -6,3 +6,5 @@ Sample001/x64/
 VulkanSample.VC.VC.opendb
 VulkanSample.VC.db
 sh.exe.stackdump
+*.iobj
+*.ipdb
