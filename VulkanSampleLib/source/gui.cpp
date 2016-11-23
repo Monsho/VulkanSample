@@ -185,40 +185,43 @@ namespace vsl
 	}	// namespace
 
 
-	//----
-	class GuiDetail
-	{
-	public:
-		static void RenderDrawList(ImDrawData* data)
-		{}
-	};	// class GuiDetail
-
+	Gui* Gui::guiHandle_ = nullptr;
 
 	//----
 	// 初期化
 	bool Gui::Initialize(Device& owner, Image& renderTarget, Image* pDepthTarget)
 	{
+		vk::Format rtFormat = renderTarget.GetFormat();
+		bool ret = true;
+		if (pDepthTarget)
+		{
+			vk::Format depthFormat = pDepthTarget->GetFormat();
+			ret = Initialize(owner, rtFormat, depthFormat);
+		}
+		else
+		{
+			ret = Initialize(owner, rtFormat, nullptr);
+		}
+		return ret;
+	}
+	bool Gui::Initialize(Device& owner, vk::ArrayProxy<vk::Format> colorFormats, vk::Optional<vk::Format> depthFormat)
+	{
+		if (guiHandle_)
+		{
+			return false;
+		}
+
 		pOwner_ = &owner;
+		guiHandle_ = this;
 
 		// コールバックの登録
 		ImGuiIO& io = ImGui::GetIO();
 
-		io.RenderDrawListsFn = &GuiDetail::RenderDrawList;
+		io.RenderDrawListsFn = &Gui::RenderDrawList;
 
 		// 描画パス作成
 		{
-			bool ret = true;
-			vk::Format rtFormat = renderTarget.GetFormat();
-			if (pDepthTarget)
-			{
-				vk::Format depthFormat = pDepthTarget->GetFormat();
-				ret = renderPass_.InitializeAsColorStandard(owner, rtFormat, depthFormat);
-			}
-			else
-			{
-				ret = renderPass_.InitializeAsColorStandard(owner, rtFormat, nullptr);
-			}
-			if (!ret)
+			if (!renderPass_.InitializeAsColorStandard(owner, colorFormats, depthFormat))
 			{
 				return false;
 			}
@@ -413,6 +416,11 @@ namespace vsl
 			}
 		}
 
+		// 頂点・インデックスバッファを作成
+		uint32_t frameCount = owner.GetSwapchain().GetImageCount();
+		vertexBuffers_ = new vsl::Buffer[frameCount];
+		indexBuffers_ = new vsl::Buffer[frameCount];
+
 		return true;
 	}
 
@@ -422,6 +430,9 @@ namespace vsl
 	{
 		if (pOwner_)
 		{
+			delete[] vertexBuffers_;
+			delete[] indexBuffers_;
+
 			if (fontSampler_)
 			{
 				pOwner_->GetDevice().destroySampler(fontSampler_);
@@ -445,7 +456,10 @@ namespace vsl
 			pshader_.Destroy();
 
 			renderPass_.Destroy();
+
+			pOwner_ = nullptr;
 		}
+		guiHandle_ = nullptr;
 	}
 
 	//----
@@ -490,6 +504,122 @@ namespace vsl
 		io.Fonts->SetTexID(fontTexture_.GetImage());
 
 		return true;
+	}
+
+	//----
+	void Gui::RenderDrawList(ImDrawData* draw_data)
+	{
+		ImGuiIO& io = ImGui::GetIO();
+
+		Gui* pThis = guiHandle_;
+		uint32_t frameIndex = pThis->pOwner_->GetCurrentBufferIndex();
+
+		// 頂点バッファ生成
+		vsl::Buffer& vbuffer = pThis->vertexBuffers_[frameIndex];
+		size_t vertex_size = draw_data->TotalVtxCount * sizeof(ImDrawVert);
+		if (vbuffer.GetSize() < vertex_size)
+		{
+			vbuffer.Destroy();
+			vbuffer.InitializeAsMappableVertexBuffer(*pThis->pOwner_, vertex_size);
+		}
+
+		// インデックスバッファ生成
+		vsl::Buffer& ibuffer = pThis->indexBuffers_[frameIndex];
+		size_t index_size = draw_data->TotalIdxCount * sizeof(ImDrawIdx);
+		if (ibuffer.GetSize() < index_size)
+		{
+			ibuffer.Destroy();
+			ibuffer.InitializeAsMappableIndexBuffer(*pThis->pOwner_, index_size);
+		}
+
+		// 頂点・インデックスのメモリを上書き
+		{
+			vk::Device& vkDev = pThis->pOwner_->GetDevice();
+			ImDrawVert* vtx_dst = static_cast<ImDrawVert*>(vkDev.mapMemory(vbuffer.GetDevMem(), 0, vertex_size));
+			ImDrawIdx* idx_dst = static_cast<ImDrawIdx*>(vkDev.mapMemory(ibuffer.GetDevMem(), 0, index_size));
+
+			for (int n = 0; n < draw_data->CmdListsCount; n++)
+			{
+				const ImDrawList* cmd_list = draw_data->CmdLists[n];
+				memcpy(vtx_dst, cmd_list->VtxBuffer.Data, cmd_list->VtxBuffer.Size * sizeof(ImDrawVert));
+				memcpy(idx_dst, cmd_list->IdxBuffer.Data, cmd_list->IdxBuffer.Size * sizeof(ImDrawIdx));
+				vtx_dst += cmd_list->VtxBuffer.Size;
+				idx_dst += cmd_list->IdxBuffer.Size;
+			}
+
+			std::array<vk::MappedMemoryRange, 2> ranges{
+				vk::MappedMemoryRange(vbuffer.GetDevMem(), 0, vertex_size),
+				vk::MappedMemoryRange(ibuffer.GetDevMem(), 0, index_size),
+			};
+			vkDev.flushMappedMemoryRanges(ranges);
+
+			vkDev.unmapMemory(vbuffer.GetDevMem());
+			vkDev.unmapMemory(ibuffer.GetDevMem());
+		}
+
+		// 各種リソース等のバインド
+		auto& cmdBuffer = pThis->pOwner_->GetCurrentCommandBuffer();
+		{
+			cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pThis->pipelineLayout_, 0, pThis->descSet_, nullptr);
+			cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pThis->pipeline_);
+
+			vk::DeviceSize offsets = 0;
+			cmdBuffer.bindVertexBuffers(0, vbuffer.GetBuffer(), offsets);
+			cmdBuffer.bindIndexBuffer(ibuffer.GetBuffer(), 0, vk::IndexType::eUint16);
+
+			float scate_trans[4];
+			scate_trans[0] = 2.0f / io.DisplaySize.x;
+			scate_trans[1] = 2.0f / io.DisplaySize.y;
+			scate_trans[2] = -1.0f;
+			scate_trans[3] = -1.0f;
+			cmdBuffer.pushConstants(pThis->pipelineLayout_, vk::ShaderStageFlagBits::eVertex, 0, sizeof(scate_trans), scate_trans);
+		}
+
+		// コマンドリストの描画
+		int vtx_offset = 0;
+		int idx_offset = 0;
+		for (int n = 0; n < draw_data->CmdListsCount; n++)
+		{
+			const ImDrawList* cmd_list = draw_data->CmdLists[n];
+			for (int cmd_i = 0; cmd_i < cmd_list->CmdBuffer.Size; cmd_i++)
+			{
+				const ImDrawCmd* pcmd = &cmd_list->CmdBuffer[cmd_i];
+				if (pcmd->UserCallback)
+				{
+					pcmd->UserCallback(cmd_list, pcmd);
+				}
+				else
+				{
+					vk::Rect2D scissor(
+						vk::Offset2D((int32_t)pcmd->ClipRect.x, (int32_t)pcmd->ClipRect.y),
+						vk::Extent2D((uint32_t)(pcmd->ClipRect.z - pcmd->ClipRect.x), (uint32_t)(pcmd->ClipRect.w - pcmd->ClipRect.y + 1/* +1 ??? */)));
+					cmdBuffer.setScissor(0, scissor);
+
+					cmdBuffer.drawIndexed(pcmd->ElemCount, 1, idx_offset, vtx_offset, 1);
+				}
+				idx_offset += pcmd->ElemCount;
+			}
+			vtx_offset += cmd_list->VtxBuffer.Size;
+		}
+	}
+
+	//----
+	// 新しいフレームの開始
+	void Gui::BeginNewFrame(uint32_t frameWidth, uint32_t frameHeight, float frameScale, float timeStep)
+	{
+		ImGuiIO& io = ImGui::GetIO();
+
+		// フレームバッファのサイズを指定する
+		io.DisplaySize = ImVec2((float)frameWidth, (float)frameHeight);
+		io.DisplayFramebufferScale = ImVec2(frameScale, frameScale);
+
+		// 時間進行を指定
+		io.DeltaTime = timeStep;
+
+		// TODO: マウスによる操作
+
+		// 新規フレーム開始
+		ImGui::NewFrame();
 	}
 
 }	// namespace vsl

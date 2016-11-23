@@ -6,6 +6,7 @@
 #include <vsl/render_pass.h>
 #include <vsl/shader.h>
 #include <vsl/image.h>
+#include <vsl/buffer.h>
 
 
 namespace vsl
@@ -15,8 +16,6 @@ namespace vsl
 
 	class Gui
 	{
-		friend class GuiDetail;
-
 	public:
 		Gui()
 		{}
@@ -27,11 +26,15 @@ namespace vsl
 
 		// 初期化
 		bool Initialize(Device& owner, Image& renderTarget, Image* pDepthTarget);
+		bool Initialize(Device& owner, vk::ArrayProxy<vk::Format> colorFormats, vk::Optional<vk::Format> depthFormat);
 		// 破棄
 		void Destroy();
 
 		// フォントイメージ生成
 		bool CreateFontImage(vk::CommandBuffer& cmdBuff, Buffer& staging);
+
+		// 新しいフレームの開始
+		void BeginNewFrame(uint32_t frameWidth, uint32_t frameHeight, float frameScale = 1.0f, float timeStep = 1.0f / 60.0f);
 
 	private:
 		Device*		pOwner_{ nullptr };
@@ -40,12 +43,22 @@ namespace vsl
 		Shader		vshader_, pshader_;
 		Image		fontTexture_;
 
+		Buffer*		vertexBuffers_;
+		Buffer*		indexBuffers_;
+
 		vk::Sampler				fontSampler_;
 		vk::DescriptorSetLayout	descSetLayout_;
 		vk::DescriptorPool		descPool_;
 		vk::DescriptorSet		descSet_;
 		vk::PipelineLayout		pipelineLayout_;
 		vk::Pipeline			pipeline_;
+
+	public:
+		// 描画命令
+		static void RenderDrawList(ImDrawData* draw_data);
+
+	private:
+		static Gui* guiHandle_;
 	};	// class Gui
 
 }	// namespace vsl

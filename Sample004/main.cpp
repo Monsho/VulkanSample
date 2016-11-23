@@ -9,6 +9,7 @@
 #include <vsl/buffer.h>
 #include <vsl/shader.h>
 #include <vsl/render_pass.h>
+#include <vsl/gui.h>
 #include <imgui.h>
 
 
@@ -127,8 +128,22 @@ public:
 			offscreenFrame_ = device.GetDevice().createFramebuffer(framebufferCreateInfo);
 		}
 
+		{
+			vk::Format format = device.GetSwapchain().GetFormat();
+			if (!gui_.Initialize(device, format, nullptr))
+			{
+				return false;
+			}
+		}
+
 		// 描画リソースの初期化
 		if (!InitializeRenderResource(device, initCmdBuffer))
+		{
+			return false;
+		}
+
+		// フォントイメージの初期化
+		if (!gui_.CreateFontImage(initCmdBuffer, fontStaging_))
 		{
 			return false;
 		}
@@ -144,6 +159,7 @@ public:
 		device.GetQueue().waitIdle();
 
 		// 一時リソースの破棄
+		fontStaging_.Destroy();
 		texStaging_.Destroy();
 		vbStaging_.Destroy();
 		ibStaging_.Destroy();
@@ -170,6 +186,10 @@ public:
 		
 		static float sRotY = 1.0f;
 
+		// TEST: imgui
+		gui_.BeginNewFrame(kScreenWidth, kScreenHeight);
+		ImGui::Text("Hello, world!");
+		
 		// UniformBufferをアップデートする
 		{
 			SceneData scene;
@@ -291,6 +311,9 @@ public:
 		}
 		cmdBuffer.endRenderPass();
 
+		// TEST: imgui render.
+		ImGui::Render();
+
 		device.ReadyPresentAndEndMainCommandBuffer();
 		device.SubmitAndPresent();
 
@@ -301,6 +324,8 @@ public:
 	bool Terminate(vsl::Device& device)
 	{
 		vk::Device& d = device.GetDevice();
+
+		gui_.Destroy();
 
 		d.destroyPipeline(postPipeline_);
 		d.destroyPipelineLayout(postPipeLayout_);
@@ -806,7 +831,9 @@ private:
 	vk::PipelineLayout	postPipeLayout_;
 	vk::Pipeline		postPipeline_;
 
-	vsl::Buffer		vbStaging_, ibStaging_, texStaging_;
+	vsl::Gui		gui_;
+
+	vsl::Buffer		vbStaging_, ibStaging_, texStaging_, fontStaging_;
 };	// class MySample
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow)

@@ -57,11 +57,19 @@ namespace vsl
 	{
 		return InitializeCommon(owner, size, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
 	}
+	bool Buffer::InitializeAsMappableVertexBuffer(Device& owner, size_t size)
+	{
+		return InitializeCommon(owner, size, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eHostVisible);
+	}
 
 	//----
 	bool Buffer::InitializeAsIndexBuffer(Device& owner, size_t size)
 	{
 		return InitializeCommon(owner, size, vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
+	}
+	bool Buffer::InitializeAsMappableIndexBuffer(Device& owner, size_t size)
+	{
+		return InitializeCommon(owner, size, vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eHostVisible);
 	}
 
 	//----
@@ -81,6 +89,7 @@ namespace vsl
 			if (devMem_) { device.freeMemory(devMem_); devMem_ = vk::DeviceMemory(); }
 		}
 		pOwner_ = nullptr;
+		size_ = 0;
 	}
 
 	//----

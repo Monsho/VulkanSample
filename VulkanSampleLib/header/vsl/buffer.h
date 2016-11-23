@@ -21,7 +21,9 @@ namespace vsl
 
 		bool InitializeAsStaging(Device& owner, size_t size, const void* pData = nullptr);
 		bool InitializeAsVertexBuffer(Device& owner, size_t size);
+		bool InitializeAsMappableVertexBuffer(Device& owner, size_t size);
 		bool InitializeAsIndexBuffer(Device& owner, size_t size);
+		bool InitializeAsMappableIndexBuffer(Device& owner, size_t size);
 		bool InitializeAsUniformBuffer(Device& owner, size_t size, const void* pData = nullptr);
 
 		void Destroy();
@@ -34,7 +36,10 @@ namespace vsl
 		}
 
 		// getter
-		vk::Buffer& GetBuffer() { return buffer_; }
+		vk::Buffer& GetBuffer()			{ return buffer_; }
+		vk::DeviceMemory& GetDevMem()	{ return devMem_; }
+		vk::BufferView& GetView()		{ return view_; }
+		size_t GetSize()				{ return size_; }
 
 	private:
 		bool InitializeCommon(Device& owner, size_t size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memProp, const void* pData = nullptr);
