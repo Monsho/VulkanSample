@@ -91,7 +91,16 @@ public:
 		if (!offscreenBuffer_.InitializeAsColorBuffer(
 			device, initCmdBuffer,
 			vk::Format::eB10G11R11UfloatPack32,
-			kScreenWidth, kScreenHeight))
+			kScreenWidth, kScreenHeight, 1, 1, true))
+		{
+			return false;
+		}
+
+		// ComputeShader出力用バッファの初期化
+		if (!computeBuffer_.InitializeAsColorBuffer(
+			device, initCmdBuffer,
+			vk::Format::eB10G11R11UfloatPack32,
+			kScreenWidth, kScreenHeight, 1, 1, true))
 		{
 			return false;
 		}
@@ -173,6 +182,10 @@ public:
 		{
 			return false;
 		}
+		if (!InitializeComputePipeline(device))
+		{
+			return false;
+		}
 
 		return true;
 	}
@@ -186,9 +199,23 @@ public:
 		
 		static float sRotY = 1.0f;
 
+		if (isChanged_)
+		{
+			isChanged_ = false;
+
+			vk::DescriptorImageInfo postDescInfo(
+				sampler_, isComputeOn_ ? computeBuffer_.GetView() : offscreenBuffer_.GetView(), vk::ImageLayout::eGeneral);
+
+			// デスクリプタセットの情報を更新する
+			std::array<vk::WriteDescriptorSet, 1> descSetInfos{
+				vk::WriteDescriptorSet(descSets_[1], 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &postDescInfo, nullptr, nullptr),
+			};
+			device.GetDevice().updateDescriptorSets(descSetInfos, nullptr);
+		}
+
 		// TEST: imgui
 		gui_.BeginNewFrame(kScreenWidth, kScreenHeight);
-		ImGui::Text("Hello, world!");
+		ImGui::Text(isComputeOn_ ? "Use Compute!" : "No Compute");
 		
 		// UniformBufferをアップデートする
 		{
@@ -223,10 +250,12 @@ public:
 				colorSubRange);
 			depthBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eTransferDstOptimal, depthSubRange);
 			offscreenBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eTransferDstOptimal, colorSubRange);
+			computeBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eTransferDstOptimal, colorSubRange);
 
 			// クリア
 			cmdBuffer.clearColorImage(currentImage, vk::ImageLayout::eTransferDstOptimal, clearColor, colorSubRange);
 			cmdBuffer.clearColorImage(offscreenBuffer_.GetImage(), vk::ImageLayout::eTransferDstOptimal, clearColor, colorSubRange);
+			cmdBuffer.clearColorImage(computeBuffer_.GetImage(), vk::ImageLayout::eTransferDstOptimal, clearColor, colorSubRange);
 			cmdBuffer.clearDepthStencilImage(depthBuffer_.GetImage(), vk::ImageLayout::eTransferDstOptimal, clearDepth, depthSubRange);
 
 			// 描画のためにレイアウトを変更
@@ -238,6 +267,7 @@ public:
 				colorSubRange);
 			depthBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eDepthStencilAttachmentOptimal, depthSubRange);
 			offscreenBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eColorAttachmentOptimal, colorSubRange);
+			computeBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
 		}
 
 		// メッシュパス開始
@@ -283,7 +313,14 @@ public:
 			colorSubRange.levelCount = 1;
 			colorSubRange.layerCount = 1;
 
-			offscreenBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eShaderReadOnlyOptimal, colorSubRange);
+			if (isComputeOn_)
+			{
+				offscreenBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+			}
+			else
+			{
+				offscreenBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eShaderReadOnlyOptimal, colorSubRange);
+			}
 		}
 		{
 			vk::ImageSubresourceRange depthSubRange;
@@ -292,6 +329,26 @@ public:
 			depthSubRange.layerCount = 1;
 
 			depthBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eShaderReadOnlyOptimal, depthSubRange);
+		}
+
+		// TEST: Compute Shader起動
+		if (isComputeOn_)
+		{
+			{
+				cmdBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline_);
+				cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, computePipeLayout_, 0, descSets_[2], nullptr);
+				cmdBuffer.dispatch(kScreenWidth / 16, kScreenHeight / 16, 1);
+			}
+
+			// Compute出力バッファのレイアウト変更
+			{
+				vk::ImageSubresourceRange colorSubRange;
+				colorSubRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+				colorSubRange.levelCount = 1;
+				colorSubRange.layerCount = 1;
+
+				computeBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eShaderReadOnlyOptimal, colorSubRange);
+			}
 		}
 
 		// ポストパス開始
@@ -336,6 +393,7 @@ public:
 		psTest_.Destroy();
 		vsPost_.Destroy();
 		psPost_.Destroy();
+		csTest_.Destroy();
 
 		for (auto& dl : descLayouts_)
 		{
@@ -356,6 +414,7 @@ public:
 			d.destroyFramebuffer(fb);
 		}
 		offscreenBuffer_.Destroy();
+		computeBuffer_.Destroy();
 		depthBuffer_.Destroy();
 		meshPass_.Destroy();
 		postPass_.Destroy();
@@ -363,7 +422,18 @@ public:
 
 	//----
 	void Input(const vsl::InputData& data)
-	{}
+	{
+		if (isMousePressed_ && !data.IsMouseButtonPressed(vsl::MouseButton::LEFT))
+		{
+			isMousePressed_ = false;
+		}
+		else if (!isMousePressed_ && data.IsMouseButtonPressed(vsl::MouseButton::LEFT))
+		{
+			isMousePressed_ = true;
+			isComputeOn_ = !isComputeOn_;
+			isChanged_ = true;
+		}
+	}
 
 private:
 	//----
@@ -399,6 +469,10 @@ private:
 			return false;
 		}
 		if (!psPost_.CreateFromFile(device, "data/post.frag.spv"))
+		{
+			return false;
+		}
+		if (!csTest_.CreateFromFile(device, "data/test.comp.spv"))
 		{
 			return false;
 		}
@@ -473,17 +547,19 @@ private:
 		{
 			// デスクリプタプールを作成する
 			{
-				std::array<vk::DescriptorPoolSize, 2> typeCounts;
+				std::array<vk::DescriptorPoolSize, 3> typeCounts;
 				typeCounts[0].type = vk::DescriptorType::eUniformBuffer;
 				typeCounts[0].descriptorCount = 2;
 				typeCounts[1].type = vk::DescriptorType::eCombinedImageSampler;
 				typeCounts[1].descriptorCount = 3;
+				typeCounts[2].type = vk::DescriptorType::eStorageImage;
+				typeCounts[2].descriptorCount = 2;
 
 				// デスクリプタプールを生成
 				vk::DescriptorPoolCreateInfo descriptorPoolInfo;
 				descriptorPoolInfo.poolSizeCount = static_cast<uint32_t>(typeCounts.size());
 				descriptorPoolInfo.pPoolSizes = typeCounts.data();
-				descriptorPoolInfo.maxSets = 2;
+				descriptorPoolInfo.maxSets = 3;
 				descPool_ = device.GetDevice().createDescriptorPool(descriptorPoolInfo);
 			}
 
@@ -532,6 +608,28 @@ private:
 				descriptorLayout.pBindings = layoutBindings.data();
 				descLayouts_.push_back(device.GetDevice().createDescriptorSetLayout(descriptorLayout, nullptr));
 			}
+			{
+				// 描画時のシェーダセットに対するデスクリプタセットのレイアウトを指定する
+				std::array<vk::DescriptorSetLayoutBinding, 2> layoutBindings;
+				// CombinedImageSampler (Color buffer) for PixelShader
+				layoutBindings[0].descriptorType = vk::DescriptorType::eStorageImage;
+				layoutBindings[0].descriptorCount = 1;
+				layoutBindings[0].binding = 0;
+				layoutBindings[0].stageFlags = vk::ShaderStageFlagBits::eCompute;
+				layoutBindings[0].pImmutableSamplers = nullptr;
+				// CombinedImageSampler (Depth buffer) for PixelShader
+				layoutBindings[1].descriptorType = vk::DescriptorType::eStorageImage;
+				layoutBindings[1].descriptorCount = 1;
+				layoutBindings[1].binding = 1;
+				layoutBindings[1].stageFlags = vk::ShaderStageFlagBits::eCompute;
+				layoutBindings[1].pImmutableSamplers = nullptr;
+
+				// レイアウトを生成
+				vk::DescriptorSetLayoutCreateInfo descriptorLayout;
+				descriptorLayout.bindingCount = static_cast<uint32_t>(layoutBindings.size());
+				descriptorLayout.pBindings = layoutBindings.data();
+				descLayouts_.push_back(device.GetDevice().createDescriptorSetLayout(descriptorLayout, nullptr));
+			}
 
 			// デスクリプタセットを作成する
 			{
@@ -539,10 +637,16 @@ private:
 					sampler_, texture_.GetView(), vk::ImageLayout::eGeneral);
 
 				vk::DescriptorImageInfo postDescInfo(
-					sampler_, offscreenBuffer_.GetView(), vk::ImageLayout::eGeneral);
+					sampler_, computeBuffer_.GetView(), vk::ImageLayout::eGeneral);
 
 				vk::DescriptorImageInfo postDepthDescInfo(
 					sampler_, depthBuffer_.GetDepthView(), vk::ImageLayout::eGeneral);
+
+				vk::DescriptorImageInfo computeInDescInfo(
+					vk::Sampler(), offscreenBuffer_.GetView(), vk::ImageLayout::eGeneral);
+
+				vk::DescriptorImageInfo computeOutDescInfo(
+					vk::Sampler(), computeBuffer_.GetView(), vk::ImageLayout::eGeneral);
 
 				vk::DescriptorBufferInfo dbInfo = sceneBuffer_.GetDescInfo();
 
@@ -554,11 +658,13 @@ private:
 				descSets_ = device.GetDevice().allocateDescriptorSets(allocInfo);
 
 				// デスクリプタセットの情報を更新する
-				std::array<vk::WriteDescriptorSet, 4> descSetInfos{
+				std::array<vk::WriteDescriptorSet, 6> descSetInfos{
 					vk::WriteDescriptorSet(descSets_[0], 0, 0, 1, vk::DescriptorType::eUniformBuffer, nullptr, &dbInfo, nullptr),
 					vk::WriteDescriptorSet(descSets_[0], 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &texDescInfo, nullptr, nullptr),
 					vk::WriteDescriptorSet(descSets_[1], 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &postDescInfo, nullptr, nullptr),
 					vk::WriteDescriptorSet(descSets_[1], 2, 0, 1, vk::DescriptorType::eCombinedImageSampler, &postDepthDescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[2], 0, 0, 1, vk::DescriptorType::eStorageImage, &computeInDescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[2], 1, 0, 1, vk::DescriptorType::eStorageImage, &computeOutDescInfo, nullptr, nullptr),
 				};
 				device.GetDevice().updateDescriptorSets(descSetInfos, nullptr);
 			}
@@ -809,15 +915,42 @@ private:
 		return true;
 	}
 
+	bool InitializeComputePipeline(vsl::Device& device)
+	{
+		{
+			// デスクリプタセットレイアウトに対応したパイプラインレイアウトを生成する
+			// 通常は1対1で生成するのかな？
+			vk::PipelineLayoutCreateInfo pPipelineLayoutCreateInfo;
+			pPipelineLayoutCreateInfo.setLayoutCount = 1;
+			pPipelineLayoutCreateInfo.pSetLayouts = &descLayouts_[2];
+			computePipeLayout_ = device.GetDevice().createPipelineLayout(pPipelineLayoutCreateInfo);
+		}
+
+		// シェーダステージの設定
+		vk::PipelineShaderStageCreateInfo shaderInfo(vk::PipelineShaderStageCreateFlags(), vk::ShaderStageFlagBits::eCompute, csTest_.GetModule(), "main");
+
+		// パイプライン生成
+		vk::ComputePipelineCreateInfo pipelineCreateInfo(vk::PipelineCreateFlags(), shaderInfo, computePipeLayout_);
+
+		computePipeline_ = device.GetDevice().createComputePipeline(device.GetPipelineCache(), pipelineCreateInfo);
+		if (!computePipeline_)
+		{
+			return false;
+		}
+
+		return true;
+	}
+
 private:
 	vsl::RenderPass	meshPass_, postPass_;
 	vsl::Image		depthBuffer_;
-	vsl::Image		offscreenBuffer_;
+	vsl::Image		offscreenBuffer_, computeBuffer_;
 	std::vector<vk::Framebuffer>	frameBuffers_;
 	vk::Framebuffer	offscreenFrame_;
 
 	vsl::Shader		vsTest_, psTest_;
 	vsl::Shader		vsPost_, psPost_;
+	vsl::Shader		csTest_;
 	vsl::Buffer		vbuffer_, ibuffer_;
 	vsl::Buffer		sceneBuffer_;
 	vsl::Image		texture_;
@@ -833,9 +966,16 @@ private:
 	vk::PipelineLayout	postPipeLayout_;
 	vk::Pipeline		postPipeline_;
 
+	vk::PipelineLayout	computePipeLayout_;
+	vk::Pipeline		computePipeline_;
+
 	vsl::Gui		gui_;
 
 	vsl::Buffer		vbStaging_, ibStaging_, texStaging_, fontStaging_;
+
+	bool isMousePressed_{ false };
+	bool isComputeOn_{ true };
+	bool isChanged_{ false };
 };	// class MySample
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow)

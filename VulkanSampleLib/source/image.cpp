@@ -12,7 +12,8 @@ namespace vsl
 		vk::CommandBuffer& cmdBuff,
 		vk::Format format,
 		uint16_t width, uint16_t height,
-		uint16_t mipLevels, uint16_t arrayLayers)
+		uint16_t mipLevels, uint16_t arrayLayers,
+		bool useCompute)
 	{
 		pOwner_ = &owner;
 		format_ = format;
@@ -29,12 +30,13 @@ namespace vsl
 
 		// イメージを作成する
 		vk::ImageCreateInfo imageCreateInfo;
+		vk::ImageUsageFlags computeFlag = useCompute ? vk::ImageUsageFlags(vk::ImageUsageFlagBits::eStorage) : vk::ImageUsageFlags();
 		imageCreateInfo.imageType = vk::ImageType::e2D;
 		imageCreateInfo.extent = vk::Extent3D(width, height, 1);
 		imageCreateInfo.format = format;
 		imageCreateInfo.mipLevels = mipLevels;
 		imageCreateInfo.arrayLayers = arrayLayers;
-		imageCreateInfo.usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
+		imageCreateInfo.usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled | computeFlag;
 		image_ = device.createImage(imageCreateInfo);
 		if (!image_)
 		{
@@ -95,7 +97,8 @@ namespace vsl
 		vk::CommandBuffer& cmdBuff,
 		vk::Format format,
 		uint16_t width, uint16_t height,
-		uint16_t mipLevels, uint16_t arrayLayers)
+		uint16_t mipLevels, uint16_t arrayLayers,
+		bool useCompute)
 	{
 		pOwner_ = &owner;
 		format_ = format;
@@ -126,12 +129,13 @@ namespace vsl
 
 		// 深度バッファのイメージを作成する
 		vk::ImageCreateInfo imageCreateInfo;
+		vk::ImageUsageFlags computeFlag = useCompute ? vk::ImageUsageFlags(vk::ImageUsageFlagBits::eStorage) : vk::ImageUsageFlags();
 		imageCreateInfo.imageType = vk::ImageType::e2D;
 		imageCreateInfo.extent = vk::Extent3D(width, height, 1);
 		imageCreateInfo.format = format;
 		imageCreateInfo.mipLevels = mipLevels;
 		imageCreateInfo.arrayLayers = arrayLayers;
-		imageCreateInfo.usage = vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled;
+		imageCreateInfo.usage = vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled | computeFlag;
 		image_ = device.createImage(imageCreateInfo);
 		if (!image_)
 		{

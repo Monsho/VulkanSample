@@ -529,8 +529,8 @@ bool InitializeContext()
 		createInfo.ppEnabledExtensionNames = extensions;
 #if defined(_DEBUG)
 		// デバッグ関連
-		createInfo.enabledLayerCount = ARRAYSIZE(kDebugLayerNames);
-		createInfo.ppEnabledLayerNames = kDebugLayerNames;
+		//createInfo.enabledLayerCount = ARRAYSIZE(kDebugLayerNames);
+		//createInfo.ppEnabledLayerNames = kDebugLayerNames;
 #endif
 
 		// インスタンス生成

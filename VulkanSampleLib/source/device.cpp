@@ -72,7 +72,7 @@ namespace vsl
 		size_t queueCount = queueProps.size();
 		for (uint32_t i = 0; i < queueCount; i++)
 		{
-			if (queueProps[i].queueFlags & queueFlag)
+			if ((queueProps[i].queueFlags & queueFlag) == queueFlag)
 			{
 				if (surface && !vkPhysicalDevice_.getSurfaceSupportKHR(i, surface))
 				{
@@ -165,7 +165,8 @@ namespace vsl
 		uint32_t graphicsQueueIndex = 0;
 		{
 			// グラフィクス用のキューを検索する
-			graphicsQueueIndex = FindQueue(vk::QueueFlagBits::eGraphics);
+			// NOTE: Computeも可能なキューを検索
+			graphicsQueueIndex = FindQueue(vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute);
 
 			float queuePriorities[] = { 0.0f };
 			vk::DeviceQueueCreateInfo queueCreateInfo;

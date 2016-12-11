@@ -25,13 +25,15 @@ namespace vsl
 			vk::CommandBuffer& cmdBuff,
 			vk::Format format,
 			uint16_t width, uint16_t height,
-			uint16_t mipLevels = 1, uint16_t arrayLayers = 1);
+			uint16_t mipLevels = 1, uint16_t arrayLayers = 1,
+			bool useCompute = false);
 		bool InitializeAsDepthStencilBuffer(
 			Device& owner,
 			vk::CommandBuffer& cmdBuff,
 			vk::Format format,
 			uint16_t width, uint16_t height,
-			uint16_t mipLevels = 1, uint16_t arrayLayers = 1);
+			uint16_t mipLevels = 1, uint16_t arrayLayers = 1,
+			bool useCompute = false);
 		bool InitializeFromTgaImage(
 			Device& owner,
 			vk::CommandBuffer& cmdBuff,

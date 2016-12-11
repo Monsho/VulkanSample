@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 14
-VisualStudioVersion = 14.0.25123.0
+VisualStudioVersion = 14.0.24720.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Sample001", "Sample001\Sample001.vcxproj", "{AE06F4BE-FD12-46B6-93A8-91A09BC2E6B1}"
 	ProjectSection(ProjectDependencies) = postProject
@@ -24,6 +24,11 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Sample004", "Sample004\Samp
 	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "VulkanSampleLib", "VulkanSampleLib\VulkanSampleLib.vcxproj", "{07943248-A6D8-43FF-B7D6-4CC1299F40B4}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Sample005", "Sample005\Sample005.vcxproj", "{59BF9AEF-7ECD-44E1-81FA-03F516324696}"
+	ProjectSection(ProjectDependencies) = postProject
+		{07943248-A6D8-43FF-B7D6-4CC1299F40B4} = {07943248-A6D8-43FF-B7D6-4CC1299F40B4}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -51,6 +56,10 @@ Global
 		{07943248-A6D8-43FF-B7D6-4CC1299F40B4}.Debug|x64.Build.0 = Debug|x64
 		{07943248-A6D8-43FF-B7D6-4CC1299F40B4}.Release|x64.ActiveCfg = Release|x64
 		{07943248-A6D8-43FF-B7D6-4CC1299F40B4}.Release|x64.Build.0 = Release|x64
+		{59BF9AEF-7ECD-44E1-81FA-03F516324696}.Debug|x64.ActiveCfg = Debug|x64
+		{59BF9AEF-7ECD-44E1-81FA-03F516324696}.Debug|x64.Build.0 = Debug|x64
+		{59BF9AEF-7ECD-44E1-81FA-03F516324696}.Release|x64.ActiveCfg = Release|x64
+		{59BF9AEF-7ECD-44E1-81FA-03F516324696}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

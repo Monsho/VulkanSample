@@ -8,6 +8,31 @@
 
 namespace vsl
 {
+	class MouseButton
+	{
+	public:
+		enum Type
+		{
+			LEFT = 0x01 << 0,
+			RIGHT = 0x01 << 1,
+			MIDDLE = 0x01 << 2,
+		};
+	};	// class MouseButton
+
+	class InputData
+	{
+		friend class Application;
+
+	public:
+		int GetMouseX() const { return mouseX_; }
+		int GetMouseY() const { return mouseY_; }
+		bool IsMouseButtonPressed(MouseButton::Type btn) const { return (mouseButton_ & (int)btn) != 0; }
+
+	public:
+		int mouseX_{ 0 }, mouseY_{ 0 };
+		int mouseButton_{ 0 };
+	};	// class InputData
+
 	//----
 	class Application
 	{
@@ -19,9 +44,10 @@ namespace vsl
 			HINSTANCE hInst,
 			std::function<bool(Device&)> initF,
 			std::function<bool(Device&)> loopF,
-			std::function<bool(Device&)> termF)
+			std::function<void(Device&)> termF,
+			std::function<void(const InputData&)> inputF)
 			: hInstance_(hInst), hWnd_()
-			, initFunc_(initF), loopFunc_(loopF), termFunc_(termF)
+			, initFunc_(initF), loopFunc_(loopF), termFunc_(termF), inputFunc_(inputF)
 			, closeRequest_(false)
 		{}
 		~Application()
@@ -49,11 +75,14 @@ namespace vsl
 
 		Device		device_;
 
-		std::function<bool(Device&)>	initFunc_;
-		std::function<bool(Device&)>	loopFunc_;
-		std::function<void(Device&)>	termFunc_;
+		std::function<bool(Device&)>			initFunc_;
+		std::function<bool(Device&)>			loopFunc_;
+		std::function<void(Device&)>			termFunc_;
+		std::function<void(const InputData&)>	inputFunc_;
 
 		bool	closeRequest_;
+
+		InputData inputData_;
 	};	// class Application
 
 }	// namespace vsl

@@ -1,6 +1,7 @@
 ﻿#include <vsl/application.h>
 #include <iostream>
 #include <sstream>
+#include <windowsx.h>
 
 
 namespace
@@ -13,6 +14,8 @@ namespace
 	static const wchar_t*	kAppName = L"VulcanSample";
 
 	static const uint64_t	kFenceTimeout = 100000000000;
+
+	static vsl::InputData* pInputData_ = nullptr;
 
 	static LRESULT CALLBACK windowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	{
@@ -60,12 +63,36 @@ namespace
 		}
 
 		case WM_LBUTTONDOWN:
+		{
+			pInputData_->mouseButton_ |= vsl::MouseButton::LEFT;
+			return 0;
+		}
 		case WM_RBUTTONDOWN:
+		{
+			pInputData_->mouseButton_ |= vsl::MouseButton::RIGHT;
+			return 0;
+		}
 		case WM_MBUTTONDOWN:
-		case WM_XBUTTONDOWN:
+		{
+			pInputData_->mouseButton_ |= vsl::MouseButton::MIDDLE;
+			return 0;
+		}
 		case WM_LBUTTONUP:
+		{
+			pInputData_->mouseButton_ &= ~vsl::MouseButton::LEFT;
+			return 0;
+		}
 		case WM_RBUTTONUP:
+		{
+			pInputData_->mouseButton_ &= ~vsl::MouseButton::RIGHT;
+			return 0;
+		}
 		case WM_MBUTTONUP:
+		{
+			pInputData_->mouseButton_ &= ~vsl::MouseButton::MIDDLE;
+			return 0;
+		}
+		case WM_XBUTTONDOWN:
 		case WM_XBUTTONUP:
 		{
 			// TODO: マウス操作に対する処理
@@ -75,6 +102,8 @@ namespace
 		case WM_MOUSEMOVE:
 		{
 			// TODO: マウス移動に対する処理
+			pInputData_->mouseX_ = GET_X_LPARAM(lParam);
+			pInputData_->mouseY_ = GET_Y_LPARAM(lParam);
 			return 0;
 		}
 
@@ -124,6 +153,7 @@ namespace vsl
 	{
 		screenWidth_ = screenWidth;
 		screenHeight_ = screenHeight;
+		pInputData_ = &inputData_;
 
 		// ウィンドウの初期化
 		if (!InitializeWindow())
@@ -150,6 +180,9 @@ namespace vsl
 			{
 				break;
 			}
+
+			// 入力に対する関数を呼び出す
+			inputFunc_(inputData_);
 
 			// アプリごとのループ処理
 			if (!loopFunc_(device_))
