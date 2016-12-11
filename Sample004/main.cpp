@@ -178,7 +178,7 @@ public:
 	}
 
 	//----
-	bool Loop(vsl::Device& device)
+	bool Loop(vsl::Device& device, const vsl::InputData& input)
 	{
 		auto currentIndex = device.AcquireNextImage();
 		auto& cmdBuffer = device.BeginMainCommandBuffer();
@@ -187,7 +187,7 @@ public:
 		static float sRotY = 1.0f;
 
 		// TEST: imgui
-		gui_.BeginNewFrame(kScreenWidth, kScreenHeight);
+		gui_.BeginNewFrame(kScreenWidth, kScreenHeight, input);
 		ImGui::Text("Hello, world!");
 		
 		// UniformBufferをアップデートする
@@ -360,10 +360,6 @@ public:
 		meshPass_.Destroy();
 		postPass_.Destroy();
 	}
-
-	//----
-	void Input(const vsl::InputData& data)
-	{}
 
 private:
 	//----
@@ -844,9 +840,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine,
 
 	vsl::Application app(hInstance,
 		std::bind(&MySample::Initialize, std::ref(mySample), std::placeholders::_1),
-		std::bind(&MySample::Loop, std::ref(mySample), std::placeholders::_1),
-		std::bind(&MySample::Terminate, std::ref(mySample), std::placeholders::_1),
-		std::bind(&MySample::Input, std::ref(mySample), std::placeholders::_1));
+		std::bind(&MySample::Loop, std::ref(mySample), std::placeholders::_1, std::placeholders::_2),
+		std::bind(&MySample::Terminate, std::ref(mySample), std::placeholders::_1));
 	app.Run(kScreenWidth, kScreenHeight);
 
 	return 0;

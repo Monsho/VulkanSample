@@ -43,11 +43,10 @@ namespace vsl
 		Application(
 			HINSTANCE hInst,
 			std::function<bool(Device&)> initF,
-			std::function<bool(Device&)> loopF,
-			std::function<void(Device&)> termF,
-			std::function<void(const InputData&)> inputF)
+			std::function<bool(Device&, const InputData&)> loopF,
+			std::function<void(Device&)> termF)
 			: hInstance_(hInst), hWnd_()
-			, initFunc_(initF), loopFunc_(loopF), termFunc_(termF), inputFunc_(inputF)
+			, initFunc_(initF), loopFunc_(loopF), termFunc_(termF)
 			, closeRequest_(false)
 		{}
 		~Application()
@@ -75,10 +74,9 @@ namespace vsl
 
 		Device		device_;
 
-		std::function<bool(Device&)>			initFunc_;
-		std::function<bool(Device&)>			loopFunc_;
-		std::function<void(Device&)>			termFunc_;
-		std::function<void(const InputData&)>	inputFunc_;
+		std::function<bool(Device&)>					initFunc_;
+		std::function<bool(Device&, const InputData&)>	loopFunc_;
+		std::function<void(Device&)>					termFunc_;
 
 		bool	closeRequest_;
 

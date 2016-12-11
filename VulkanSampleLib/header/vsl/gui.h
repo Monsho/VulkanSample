@@ -13,6 +13,7 @@ namespace vsl
 {
 	class Device;
 	class Buffer;
+	class InputData;
 
 	class Gui
 	{
@@ -34,7 +35,7 @@ namespace vsl
 		bool CreateFontImage(vk::CommandBuffer& cmdBuff, Buffer& staging);
 
 		// 新しいフレームの開始
-		void BeginNewFrame(uint32_t frameWidth, uint32_t frameHeight, float frameScale = 1.0f, float timeStep = 1.0f / 60.0f);
+		void BeginNewFrame(uint32_t frameWidth, uint32_t frameHeight, const InputData& input, float frameScale = 1.0f, float timeStep = 1.0f / 60.0f);
 
 	private:
 		Device*		pOwner_{ nullptr };

@@ -181,11 +181,8 @@ namespace vsl
 				break;
 			}
 
-			// 入力に対する関数を呼び出す
-			inputFunc_(inputData_);
-
 			// アプリごとのループ処理
-			if (!loopFunc_(device_))
+			if (!loopFunc_(device_, inputData_))
 			{
 				break;
 			}

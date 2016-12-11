@@ -605,7 +605,7 @@ namespace vsl
 
 	//----
 	// 新しいフレームの開始
-	void Gui::BeginNewFrame(uint32_t frameWidth, uint32_t frameHeight, float frameScale, float timeStep)
+	void Gui::BeginNewFrame(uint32_t frameWidth, uint32_t frameHeight, const InputData& input, float frameScale, float timeStep)
 	{
 		ImGuiIO& io = ImGui::GetIO();
 
@@ -617,6 +617,10 @@ namespace vsl
 		io.DeltaTime = timeStep;
 
 		// TODO: マウスによる操作
+		io.MousePos = ImVec2((float)input.GetMouseX(), (float)input.GetMouseY());
+		io.MouseDown[0] = input.IsMouseButtonPressed(vsl::MouseButton::LEFT);
+		io.MouseDown[1] = input.IsMouseButtonPressed(vsl::MouseButton::RIGHT);
+		io.MouseDown[2] = input.IsMouseButtonPressed(vsl::MouseButton::MIDDLE);
 
 		// 新規フレーム開始
 		ImGui::NewFrame();

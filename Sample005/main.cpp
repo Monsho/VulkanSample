@@ -191,7 +191,7 @@ public:
 	}
 
 	//----
-	bool Loop(vsl::Device& device)
+	bool Loop(vsl::Device& device, const vsl::InputData& input)
 	{
 		auto currentIndex = device.AcquireNextImage();
 		auto& cmdBuffer = device.BeginMainCommandBuffer();
@@ -199,9 +199,11 @@ public:
 		
 		static float sRotY = 1.0f;
 
-		if (isChanged_)
+		// GUI
+		gui_.BeginNewFrame(kScreenWidth, kScreenHeight, input);
+		if (ImGui::Button(isComputeOn_ ? "Compute Enable" : "Compute Disable"))
 		{
-			isChanged_ = false;
+			isComputeOn_ = !isComputeOn_;
 
 			vk::DescriptorImageInfo postDescInfo(
 				sampler_, isComputeOn_ ? computeBuffer_.GetView() : offscreenBuffer_.GetView(), vk::ImageLayout::eGeneral);
@@ -213,10 +215,6 @@ public:
 			device.GetDevice().updateDescriptorSets(descSetInfos, nullptr);
 		}
 
-		// TEST: imgui
-		gui_.BeginNewFrame(kScreenWidth, kScreenHeight);
-		ImGui::Text(isComputeOn_ ? "Use Compute!" : "No Compute");
-		
 		// UniformBufferをアップデートする
 		{
 			SceneData scene;
@@ -418,21 +416,6 @@ public:
 		depthBuffer_.Destroy();
 		meshPass_.Destroy();
 		postPass_.Destroy();
-	}
-
-	//----
-	void Input(const vsl::InputData& data)
-	{
-		if (isMousePressed_ && !data.IsMouseButtonPressed(vsl::MouseButton::LEFT))
-		{
-			isMousePressed_ = false;
-		}
-		else if (!isMousePressed_ && data.IsMouseButtonPressed(vsl::MouseButton::LEFT))
-		{
-			isMousePressed_ = true;
-			isComputeOn_ = !isComputeOn_;
-			isChanged_ = true;
-		}
 	}
 
 private:
@@ -973,20 +956,18 @@ private:
 
 	vsl::Buffer		vbStaging_, ibStaging_, texStaging_, fontStaging_;
 
-	bool isMousePressed_{ false };
 	bool isComputeOn_{ true };
-	bool isChanged_{ false };
 };	// class MySample
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow)
 {
 	MySample mySample;
 
+	using namespace std::placeholders;
 	vsl::Application app(hInstance,
-		std::bind(&MySample::Initialize, std::ref(mySample), std::placeholders::_1),
-		std::bind(&MySample::Loop, std::ref(mySample), std::placeholders::_1),
-		std::bind(&MySample::Terminate, std::ref(mySample), std::placeholders::_1),
-		std::bind(&MySample::Input, std::ref(mySample), std::placeholders::_1));
+		std::bind(&MySample::Initialize, std::ref(mySample), _1),
+		std::bind(&MySample::Loop, std::ref(mySample), _1, _2),
+		std::bind(&MySample::Terminate, std::ref(mySample), _1));
 	app.Run(kScreenWidth, kScreenHeight);
 
 	return 0;
