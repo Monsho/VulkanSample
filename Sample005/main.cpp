@@ -329,7 +329,7 @@ public:
 			depthBuffer_.SetImageLayout(cmdBuffer, vk::ImageLayout::eShaderReadOnlyOptimal, depthSubRange);
 		}
 
-		// TEST: Compute Shader‹N“®
+		// Compute Shader‹N“®
 		if (isComputeOn_)
 		{
 			{
