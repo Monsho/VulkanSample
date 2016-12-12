@@ -595,13 +595,13 @@ private:
 			{
 				// 描画時のシェーダセットに対するデスクリプタセットのレイアウトを指定する
 				std::array<vk::DescriptorSetLayoutBinding, 2> layoutBindings;
-				// CombinedImageSampler (Color buffer) for PixelShader
+				// read only image for ComputeShader
 				layoutBindings[0].descriptorType = vk::DescriptorType::eStorageImage;
 				layoutBindings[0].descriptorCount = 1;
 				layoutBindings[0].binding = 0;
 				layoutBindings[0].stageFlags = vk::ShaderStageFlagBits::eCompute;
 				layoutBindings[0].pImmutableSamplers = nullptr;
-				// CombinedImageSampler (Depth buffer) for PixelShader
+				// write only image for ComputeShader
 				layoutBindings[1].descriptorType = vk::DescriptorType::eStorageImage;
 				layoutBindings[1].descriptorCount = 1;
 				layoutBindings[1].binding = 1;
