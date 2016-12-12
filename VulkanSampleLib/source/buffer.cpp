@@ -59,7 +59,7 @@ namespace vsl
 	}
 	bool Buffer::InitializeAsMappableVertexBuffer(Device& owner, size_t size)
 	{
-		return InitializeCommon(owner, size, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eHostVisible);
+		return InitializeCommon(owner, size, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 	}
 
 	//----
@@ -69,7 +69,7 @@ namespace vsl
 	}
 	bool Buffer::InitializeAsMappableIndexBuffer(Device& owner, size_t size)
 	{
-		return InitializeCommon(owner, size, vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eHostVisible);
+		return InitializeCommon(owner, size, vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 	}
 
 	//----

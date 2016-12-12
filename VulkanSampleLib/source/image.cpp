@@ -413,12 +413,14 @@ end:
 		if (newImageLayout == vk::ImageLayout::eTransferDstOptimal)					imageMemoryBarrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
 		// 転送元
 		else if (newImageLayout == vk::ImageLayout::eTransferSrcOptimal)			imageMemoryBarrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;// | imageMemoryBarrier.srcAccessMask;
-																																						 // カラー
+		// カラー
 		else if (newImageLayout == vk::ImageLayout::eColorAttachmentOptimal)		imageMemoryBarrier.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
 		// 深度・ステンシル
 		else if (newImageLayout == vk::ImageLayout::eDepthStencilAttachmentOptimal)	imageMemoryBarrier.dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite;
 		// シェーダリソース
 		else if (newImageLayout == vk::ImageLayout::eShaderReadOnlyOptimal)			imageMemoryBarrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+		// Present
+		else if (newImageLayout == vk::ImageLayout::ePresentSrcKHR)					imageMemoryBarrier.dstAccessMask = vk::AccessFlagBits::eMemoryRead;
 
 		// Put barrier on top
 		// Put barrier inside setup command buffer

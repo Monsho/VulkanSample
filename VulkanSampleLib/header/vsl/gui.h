@@ -37,6 +37,13 @@ namespace vsl
 		// 新しいフレームの開始
 		void BeginNewFrame(uint32_t frameWidth, uint32_t frameHeight, const InputData& input, float frameScale = 1.0f, float timeStep = 1.0f / 60.0f);
 
+		// レンダーパス開始情報を設定する
+		void SetPassBeginInfo(const vk::RenderPassBeginInfo& info)
+		{
+			passBeginInfo_ = info;
+			passBeginInfo_.renderPass = renderPass_.GetPass();
+		}
+
 	private:
 		Device*		pOwner_{ nullptr };
 
@@ -44,8 +51,9 @@ namespace vsl
 		Shader		vshader_, pshader_;
 		Image		fontTexture_;
 
-		Buffer*		vertexBuffers_;
-		Buffer*		indexBuffers_;
+		Buffer*			vertexBuffers_;
+		Buffer*			indexBuffers_;
+		vk::DeviceSize	nonCoherentAtomSize_;
 
 		vk::Sampler				fontSampler_;
 		vk::DescriptorSetLayout	descSetLayout_;
@@ -53,6 +61,7 @@ namespace vsl
 		vk::DescriptorSet		descSet_;
 		vk::PipelineLayout		pipelineLayout_;
 		vk::Pipeline			pipeline_;
+		vk::RenderPassBeginInfo	passBeginInfo_;
 
 	public:
 		// 描画命令

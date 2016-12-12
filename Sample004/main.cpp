@@ -312,6 +312,7 @@ public:
 		cmdBuffer.endRenderPass();
 
 		// TEST: imgui render.
+		gui_.SetPassBeginInfo(renderPassBeginInfo);
 		ImGui::Render();
 
 		device.ReadyPresentAndEndMainCommandBuffer();

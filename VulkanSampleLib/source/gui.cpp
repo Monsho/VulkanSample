@@ -214,6 +214,8 @@ namespace vsl
 		pOwner_ = &owner;
 		guiHandle_ = this;
 
+		nonCoherentAtomSize_ = owner.GetPhysicalDevice().getProperties().limits.nonCoherentAtomSize;
+
 		// コールバックの登録
 		ImGuiIO& io = ImGui::GetIO();
 
@@ -513,30 +515,33 @@ namespace vsl
 
 		Gui* pThis = guiHandle_;
 		uint32_t frameIndex = pThis->pOwner_->GetCurrentBufferIndex();
+		size_t nonCohSize = pThis->nonCoherentAtomSize_;
 
 		// 頂点バッファ生成
 		vsl::Buffer& vbuffer = pThis->vertexBuffers_[frameIndex];
 		size_t vertex_size = draw_data->TotalVtxCount * sizeof(ImDrawVert);
+		size_t coherent_vertex_size = ((vertex_size + nonCohSize - 1) / nonCohSize) * nonCohSize;
 		if (vbuffer.GetSize() < vertex_size)
 		{
 			vbuffer.Destroy();
-			vbuffer.InitializeAsMappableVertexBuffer(*pThis->pOwner_, vertex_size);
+			vbuffer.InitializeAsMappableVertexBuffer(*pThis->pOwner_, coherent_vertex_size);
 		}
 
 		// インデックスバッファ生成
 		vsl::Buffer& ibuffer = pThis->indexBuffers_[frameIndex];
 		size_t index_size = draw_data->TotalIdxCount * sizeof(ImDrawIdx);
+		size_t coherent_index_size = ((index_size + nonCohSize - 1) / nonCohSize) * nonCohSize;
 		if (ibuffer.GetSize() < index_size)
 		{
 			ibuffer.Destroy();
-			ibuffer.InitializeAsMappableIndexBuffer(*pThis->pOwner_, index_size);
+			ibuffer.InitializeAsMappableIndexBuffer(*pThis->pOwner_, coherent_index_size);
 		}
 
 		// 頂点・インデックスのメモリを上書き
 		{
 			vk::Device& vkDev = pThis->pOwner_->GetDevice();
-			ImDrawVert* vtx_dst = static_cast<ImDrawVert*>(vkDev.mapMemory(vbuffer.GetDevMem(), 0, vertex_size));
-			ImDrawIdx* idx_dst = static_cast<ImDrawIdx*>(vkDev.mapMemory(ibuffer.GetDevMem(), 0, index_size));
+			ImDrawVert* vtx_dst = static_cast<ImDrawVert*>(vkDev.mapMemory(vbuffer.GetDevMem(), 0, coherent_vertex_size));
+			ImDrawIdx* idx_dst = static_cast<ImDrawIdx*>(vkDev.mapMemory(ibuffer.GetDevMem(), 0, coherent_index_size));
 
 			for (int n = 0; n < draw_data->CmdListsCount; n++)
 			{
@@ -548,8 +553,8 @@ namespace vsl
 			}
 
 			std::array<vk::MappedMemoryRange, 2> ranges{
-				vk::MappedMemoryRange(vbuffer.GetDevMem(), 0, vertex_size),
-				vk::MappedMemoryRange(ibuffer.GetDevMem(), 0, index_size),
+				vk::MappedMemoryRange(vbuffer.GetDevMem(), 0, coherent_vertex_size),
+				vk::MappedMemoryRange(ibuffer.GetDevMem(), 0, coherent_index_size),
 			};
 			vkDev.flushMappedMemoryRanges(ranges);
 
@@ -557,8 +562,11 @@ namespace vsl
 			vkDev.unmapMemory(ibuffer.GetDevMem());
 		}
 
-		// 各種リソース等のバインド
+		// レンダーパス開始
 		auto& cmdBuffer = pThis->pOwner_->GetCurrentCommandBuffer();
+		cmdBuffer.beginRenderPass(pThis->passBeginInfo_, vk::SubpassContents::eInline);
+
+		// 各種リソース等のバインド
 		{
 			cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pThis->pipelineLayout_, 0, pThis->descSet_, nullptr);
 			cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pThis->pipeline_);
@@ -601,6 +609,8 @@ namespace vsl
 			}
 			vtx_offset += cmd_list->VtxBuffer.Size;
 		}
+
+		cmdBuffer.endRenderPass();
 	}
 
 	//----
