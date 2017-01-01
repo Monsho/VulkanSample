@@ -17,6 +17,46 @@ namespace
 {
 	static const uint16_t kScreenWidth = 1920;
 	static const uint16_t kScreenHeight = 1080;
+
+	void BitReverse(int *Indices, int N, int n)
+	{
+		unsigned int mask = 0x1;
+		for (int j = 0; j < N; j++)
+		{
+			unsigned int val = 0x0;
+			int temp = int(Indices[j]);
+			for (int i = 0; i < n; i++)
+			{
+				unsigned int t = (mask & temp);
+				val = (val << 1) | t;
+				temp = temp >> 1;
+			}
+			Indices[j] = val;
+		}
+	}
+
+	void GetButterflyValues(int butterflyPass, int NumButterflies, int x, int *i1, int *i2, float *w1, float *w2)
+	{
+		int sectionWidth = 2 << butterflyPass;
+		int halfSectionWidth = sectionWidth / 2;
+
+		int sectionStartOffset = x & ~(sectionWidth - 1);
+		int halfSectionOffset = x & (halfSectionWidth - 1);
+		int sectionOffset = x & (sectionWidth - 1);
+
+		*w1 = float(cosl(2.0f*3.1415926f*sectionOffset / (float)sectionWidth));
+		*w2 = float(-sinl(2.0f*3.1415926f*sectionOffset / (float)sectionWidth));
+
+		*i1 = sectionStartOffset + halfSectionOffset;
+		*i2 = sectionStartOffset + halfSectionOffset + halfSectionWidth;
+
+		if (butterflyPass == 0)
+		{
+			BitReverse(i1, 1, NumButterflies);
+			BitReverse(i2, 1, NumButterflies);
+		}
+	}
+
 }	// namespace
 
 bool Initialize(vsl::Device& device)
@@ -64,6 +104,15 @@ public:
 	//----
 	bool Initialize(vsl::Device& device)
 	{
+		int i1, i2;
+		float w1, w2;
+		for (int i = 0; i < 256; i++)
+		{
+			GetButterflyValues(0, 8, i, &i1, &i2, &w1, &w2);
+			char s[256];
+			sprintf_s(s, 256, "%d : %f, %f\n", i, w1, w2);
+			OutputDebugStringA(s);
+		}
 		// レンダーパスの初期化
 		if (!InitializeMeshPass(device))
 		{
@@ -103,6 +152,18 @@ public:
 			kScreenWidth, kScreenHeight, 1, 1, true))
 		{
 			return false;
+		}
+
+		// FFT用バッファの初期化
+		for (auto& image : fftTargets_)
+		{
+			if (!image.InitializeAsColorBuffer(
+				device, initCmdBuffer,
+				vk::Format::eR16G16B16A16Sfloat,
+				256, 256, 1, 1, true))
+			{
+				return false;
+			}
 		}
 
 		// フレームバッファ設定
@@ -186,6 +247,10 @@ public:
 		{
 			return false;
 		}
+		if (!InitializeFFTPipeline(device))
+		{
+			return false;
+		}
 
 		return true;
 	}
@@ -213,6 +278,97 @@ public:
 				vk::WriteDescriptorSet(descSets_[1], 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &postDescInfo, nullptr, nullptr),
 			};
 			device.GetDevice().updateDescriptorSets(descSetInfos, nullptr);
+		}
+		if (ImGui::Button("Compute FFT"))
+		{
+			vk::ImageSubresourceRange colorSubRange;
+			colorSubRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+			colorSubRange.levelCount = 1;
+			colorSubRange.layerCount = 1;
+			fftTargets_[0].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+			fftTargets_[1].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+
+			// row pass を処理する
+			{
+				// dispatch
+				cmdBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, fftPipelines_[0]);
+				cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, fftPipeLayout_, 0, descSets_[4], nullptr);
+				cmdBuffer.dispatch(1, texture_.GetHeight(), 1);
+			}
+
+			fftTargets_[0].SetImageLayout(cmdBuffer, vk::ImageLayout::eShaderReadOnlyOptimal, colorSubRange);
+			fftTargets_[1].SetImageLayout(cmdBuffer, vk::ImageLayout::eShaderReadOnlyOptimal, colorSubRange);
+			fftTargets_[2].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+			fftTargets_[3].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+
+			// collums pass を処理する
+			{
+				// dispatch
+				cmdBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, fftPipelines_[1]);
+				cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, fftPipeLayout_, 0, descSets_[5], nullptr);
+				cmdBuffer.dispatch(1, texture_.GetWidth(), 1);
+			}
+
+			fftTargets_[2].SetImageLayout(cmdBuffer, vk::ImageLayout::eShaderReadOnlyOptimal, colorSubRange);
+			fftTargets_[3].SetImageLayout(cmdBuffer, vk::ImageLayout::eShaderReadOnlyOptimal, colorSubRange);
+			fftTargets_[0].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+			fftTargets_[1].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+
+			// invert row pass を処理する
+			{
+				// dispatch
+				cmdBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, fftPipelines_[2]);
+				cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, fftPipeLayout_, 0, descSets_[6], nullptr);
+				cmdBuffer.dispatch(1, texture_.GetHeight(), 1);
+			}
+
+			fftTargets_[0].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+			fftTargets_[1].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+			fftTargets_[4].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+			fftTargets_[5].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+
+			// invert collums pass を処理する
+			{
+				// dispatch
+				cmdBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, fftPipelines_[3]);
+				cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, fftPipeLayout_, 0, descSets_[7], nullptr);
+				cmdBuffer.dispatch(1, texture_.GetWidth(), 1);
+			}
+
+			fftTargets_[4].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+			fftTargets_[5].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+
+			isFFTComplete_ = true;
+			viewType_ = 1;
+		}
+		static const char* kViewTypeStrs[] = {"Texture", "FFT", "InvFFT"};
+		if (ImGui::Combo("View Type", &viewType_, kViewTypeStrs, ARRAYSIZE(kViewTypeStrs)))
+		{
+			if (isFFTComplete_)
+			{
+				if (viewType_ == 0)
+				{
+					vk::DescriptorImageInfo texDescInfo(
+						sampler_, texture_.GetView(), vk::ImageLayout::eGeneral);
+
+					// デスクリプタセットの情報を更新する
+					std::array<vk::WriteDescriptorSet, 1> descSetInfos{
+						vk::WriteDescriptorSet(descSets_[0], 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &texDescInfo, nullptr, nullptr),
+					};
+					device.GetDevice().updateDescriptorSets(descSetInfos, nullptr);
+				}
+				else if (viewType_ == 2)
+				{
+					vk::DescriptorImageInfo texDescInfo(
+						sampler_, fftTargets_[4].GetView(), vk::ImageLayout::eGeneral);
+
+					// デスクリプタセットの情報を更新する
+					std::array<vk::WriteDescriptorSet, 1> descSetInfos{
+						vk::WriteDescriptorSet(descSets_[0], 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &texDescInfo, nullptr, nullptr),
+					};
+					device.GetDevice().updateDescriptorSets(descSetInfos, nullptr);
+				}
+			}
 		}
 
 		// UniformBufferをアップデートする
@@ -285,21 +441,23 @@ public:
 
 			// 各リソース等のバインド
 			vk::DeviceSize offsets = 0;
-			cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipeLayout_, 0, descSets_[0], nullptr);
-			cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline_);
+			if (!isFFTComplete_ || (viewType_ != 1))
+			{
+				cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipeLayout_, 0, descSets_[0], nullptr);
+				cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline_);
+			}
+			else
+			{
+				cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, fftViewPipeLayout_, 0, descSets_[3], nullptr);
+				cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, fftViewPipeline_);
+			}
 			cmdBuffer.bindVertexBuffers(0, vbuffer_.GetBuffer(), offsets);
 			cmdBuffer.bindIndexBuffer(ibuffer_.GetBuffer(), 0, vk::IndexType::eUint32);
 
 			MeshData mesh1;
-			mesh1.mtxModel_ = glm::rotate(glm::mat4x4(), glm::radians(sRotY), glm::vec3(0.0f, 1.0f, 0.0f));
-			sRotY += 0.1f; if (sRotY > 360.0f) sRotY -= 360.0f;
+			mesh1.mtxModel_ = glm::scale(glm::mat4x4(), glm::vec3(1.5f, 1.5f, 1.0f));
+			mesh1.mtxModel_[3].z = 8.0f;
 			cmdBuffer.pushConstants(pipeLayout_, vk::ShaderStageFlagBits::eVertex, 0, sizeof(mesh1), &mesh1);
-			cmdBuffer.drawIndexed(6, 1, 0, 0, 1);
-
-			MeshData mesh2 = mesh1;
-			mesh2.mtxModel_[3].x = 0.5f;
-			mesh2.mtxModel_[3].z = 7.0f;
-			cmdBuffer.pushConstants(pipeLayout_, vk::ShaderStageFlagBits::eVertex, 0, sizeof(mesh2), &mesh2);
 			cmdBuffer.drawIndexed(6, 1, 0, 0, 1);
 		}
 		cmdBuffer.endRenderPass();
@@ -357,6 +515,12 @@ public:
 		renderPassBeginInfo.framebuffer = frameBuffers_[currentIndex];
 		cmdBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
 		{
+			vk::Viewport viewport = vk::Viewport(0.0f, 0.0f, static_cast<float>(kScreenWidth), static_cast<float>(kScreenHeight), 0.0f, 1.0f);
+			cmdBuffer.setViewport(0, viewport);
+
+			vk::Rect2D scissor = vk::Rect2D(vk::Offset2D(), vk::Extent2D(kScreenWidth, kScreenHeight));
+			cmdBuffer.setScissor(0, scissor);
+
 			// 各リソース等のバインド
 			vk::DeviceSize offsets = 0;
 			cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, postPipeLayout_, 0, descSets_[1], nullptr);
@@ -383,18 +547,30 @@ public:
 
 		gui_.Destroy();
 
+		for (auto& pipe : fftPipelines_)
+		{
+			d.destroyPipeline(pipe);
+		}
+		d.destroyPipelineLayout(fftPipeLayout_);
 		d.destroyPipeline(computePipeline_);
 		d.destroyPipelineLayout(computePipeLayout_);
 		d.destroyPipeline(postPipeline_);
 		d.destroyPipelineLayout(postPipeLayout_);
+		d.destroyPipeline(fftViewPipeline_);
+		d.destroyPipelineLayout(fftViewPipeLayout_);
 		d.destroyPipeline(pipeline_);
 		d.destroyPipelineLayout(pipeLayout_);
 
 		vsTest_.Destroy();
 		psTest_.Destroy();
+		psView_.Destroy();
 		vsPost_.Destroy();
 		psPost_.Destroy();
 		csTest_.Destroy();
+		for (auto& s : csFFTs_)
+		{
+			s.Destroy();
+		}
 
 		for (auto& dl : descLayouts_)
 		{
@@ -416,6 +592,10 @@ public:
 		}
 		offscreenBuffer_.Destroy();
 		computeBuffer_.Destroy();
+		for (auto& image : fftTargets_)
+		{
+			image.Destroy();
+		}
 		depthBuffer_.Destroy();
 		meshPass_.Destroy();
 		postPass_.Destroy();
@@ -450,6 +630,10 @@ private:
 		{
 			return false;
 		}
+		if (!psView_.CreateFromFile(device, "data/fft_view.frag.spv"))
+		{
+			return false;
+		}
 		if (!vsPost_.CreateFromFile(device, "data/post.vert.spv"))
 		{
 			return false;
@@ -462,9 +646,13 @@ private:
 		{
 			return false;
 		}
+		if (!csFFTs_[0].CreateFromFile(device, "data/fft_r.comp.spv")) { return false; }
+		if (!csFFTs_[1].CreateFromFile(device, "data/fft_c.comp.spv")) { return false; }
+		if (!csFFTs_[2].CreateFromFile(device, "data/ifft_r.comp.spv")) { return false; }
+		if (!csFFTs_[3].CreateFromFile(device, "data/ifft_c.comp.spv")) { return false; }
 
 		// テクスチャ読み込み
-		if (!texture_.InitializeFromTgaImage(device, initCmdBuffer, texStaging_, "data/icon.tga"))
+		if (!texture_.InitializeFromTgaImage(device, initCmdBuffer, texStaging_, "data/default.tga"))
 		{
 			return false;
 		}
@@ -472,9 +660,9 @@ private:
 		// サンプラ
 		{
 			vk::SamplerCreateInfo samplerCreateInfo;
-			samplerCreateInfo.magFilter = vk::Filter::eLinear;
-			samplerCreateInfo.minFilter = vk::Filter::eLinear;
-			samplerCreateInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+			samplerCreateInfo.magFilter = vk::Filter::eNearest;
+			samplerCreateInfo.minFilter = vk::Filter::eNearest;
+			samplerCreateInfo.mipmapMode = vk::SamplerMipmapMode::eNearest;
 			samplerCreateInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
 			samplerCreateInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
 			samplerCreateInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
@@ -535,21 +723,22 @@ private:
 			{
 				std::array<vk::DescriptorPoolSize, 3> typeCounts;
 				typeCounts[0].type = vk::DescriptorType::eUniformBuffer;
-				typeCounts[0].descriptorCount = 2;
+				typeCounts[0].descriptorCount = 3;
 				typeCounts[1].type = vk::DescriptorType::eCombinedImageSampler;
-				typeCounts[1].descriptorCount = 3;
+				typeCounts[1].descriptorCount = 5;
 				typeCounts[2].type = vk::DescriptorType::eStorageImage;
-				typeCounts[2].descriptorCount = 2;
+				typeCounts[2].descriptorCount = 18;
 
 				// デスクリプタプールを生成
 				vk::DescriptorPoolCreateInfo descriptorPoolInfo;
 				descriptorPoolInfo.poolSizeCount = static_cast<uint32_t>(typeCounts.size());
 				descriptorPoolInfo.pPoolSizes = typeCounts.data();
-				descriptorPoolInfo.maxSets = 3;
+				descriptorPoolInfo.maxSets = 8;
 				descPool_ = device.GetDevice().createDescriptorPool(descriptorPoolInfo);
 			}
 
 			// デスクリプタセットレイアウトを作成する
+			std::vector<vk::DescriptorSetLayout> refLayouts;
 			{
 				// 描画時のシェーダセットに対するデスクリプタセットのレイアウトを指定する
 				std::array<vk::DescriptorSetLayoutBinding, 2> layoutBindings;
@@ -570,7 +759,9 @@ private:
 				vk::DescriptorSetLayoutCreateInfo descriptorLayout;
 				descriptorLayout.bindingCount = static_cast<uint32_t>(layoutBindings.size());
 				descriptorLayout.pBindings = layoutBindings.data();
-				descLayouts_.push_back(device.GetDevice().createDescriptorSetLayout(descriptorLayout, nullptr));
+				vk::DescriptorSetLayout sl = device.GetDevice().createDescriptorSetLayout(descriptorLayout, nullptr);
+				descLayouts_.push_back(sl);
+				refLayouts.push_back(sl);
 			}
 			{
 				// 描画時のシェーダセットに対するデスクリプタセットのレイアウトを指定する
@@ -592,7 +783,9 @@ private:
 				vk::DescriptorSetLayoutCreateInfo descriptorLayout;
 				descriptorLayout.bindingCount = static_cast<uint32_t>(layoutBindings.size());
 				descriptorLayout.pBindings = layoutBindings.data();
-				descLayouts_.push_back(device.GetDevice().createDescriptorSetLayout(descriptorLayout, nullptr));
+				vk::DescriptorSetLayout sl = device.GetDevice().createDescriptorSetLayout(descriptorLayout, nullptr);
+				descLayouts_.push_back(sl);
+				refLayouts.push_back(sl);
 			}
 			{
 				// 描画時のシェーダセットに対するデスクリプタセットのレイアウトを指定する
@@ -614,7 +807,45 @@ private:
 				vk::DescriptorSetLayoutCreateInfo descriptorLayout;
 				descriptorLayout.bindingCount = static_cast<uint32_t>(layoutBindings.size());
 				descriptorLayout.pBindings = layoutBindings.data();
-				descLayouts_.push_back(device.GetDevice().createDescriptorSetLayout(descriptorLayout, nullptr));
+				vk::DescriptorSetLayout sl = device.GetDevice().createDescriptorSetLayout(descriptorLayout, nullptr);
+				descLayouts_.push_back(sl);
+				refLayouts.push_back(sl);
+			}
+			{
+				// 描画時のシェーダセットに対するデスクリプタセットのレイアウトを指定する
+				std::array<vk::DescriptorSetLayoutBinding, 3> layoutBindings{
+					vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eVertex),
+					vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eCombinedImageSampler, 1, vk::ShaderStageFlagBits::eFragment),
+					vk::DescriptorSetLayoutBinding(2, vk::DescriptorType::eCombinedImageSampler, 1, vk::ShaderStageFlagBits::eFragment),
+				};
+
+				// レイアウトを生成
+				vk::DescriptorSetLayoutCreateInfo descriptorLayout;
+				descriptorLayout.bindingCount = static_cast<uint32_t>(layoutBindings.size());
+				descriptorLayout.pBindings = layoutBindings.data();
+				vk::DescriptorSetLayout sl = device.GetDevice().createDescriptorSetLayout(descriptorLayout, nullptr);
+				descLayouts_.push_back(sl);
+				refLayouts.push_back(sl);
+			}
+			{
+				// 描画時のシェーダセットに対するデスクリプタセットのレイアウトを指定する
+				std::array<vk::DescriptorSetLayoutBinding, 4> layoutBindings{
+					vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute),
+					vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute),
+					vk::DescriptorSetLayoutBinding(2, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute),
+					vk::DescriptorSetLayoutBinding(3, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute),
+				};
+
+				// レイアウトを生成
+				vk::DescriptorSetLayoutCreateInfo descriptorLayout;
+				descriptorLayout.bindingCount = static_cast<uint32_t>(layoutBindings.size());
+				descriptorLayout.pBindings = layoutBindings.data();
+				vk::DescriptorSetLayout sl = device.GetDevice().createDescriptorSetLayout(descriptorLayout, nullptr);
+				descLayouts_.push_back(sl);
+				refLayouts.push_back(sl);
+				refLayouts.push_back(sl);
+				refLayouts.push_back(sl);
+				refLayouts.push_back(sl);
 			}
 
 			// デスクリプタセットを作成する
@@ -634,23 +865,61 @@ private:
 				vk::DescriptorImageInfo computeOutDescInfo(
 					vk::Sampler(), computeBuffer_.GetView(), vk::ImageLayout::eGeneral);
 
+				vk::DescriptorImageInfo fftvRDescInfo(
+					sampler_, fftTargets_[2].GetView(), vk::ImageLayout::eGeneral);
+				vk::DescriptorImageInfo fftvIDescInfo(
+					sampler_, fftTargets_[3].GetView(), vk::ImageLayout::eGeneral);
+
+				vk::DescriptorImageInfo fftSrcDescInfo(
+					vk::Sampler(), texture_.GetView(), vk::ImageLayout::eGeneral);
+				vk::DescriptorImageInfo fft0DescInfo(
+					vk::Sampler(), fftTargets_[0].GetView(), vk::ImageLayout::eGeneral);
+				vk::DescriptorImageInfo fft1DescInfo(
+					vk::Sampler(), fftTargets_[1].GetView(), vk::ImageLayout::eGeneral);
+				vk::DescriptorImageInfo fft2DescInfo(
+					vk::Sampler(), fftTargets_[2].GetView(), vk::ImageLayout::eGeneral);
+				vk::DescriptorImageInfo fft3DescInfo(
+					vk::Sampler(), fftTargets_[3].GetView(), vk::ImageLayout::eGeneral);
+				vk::DescriptorImageInfo fft4DescInfo(
+					vk::Sampler(), fftTargets_[4].GetView(), vk::ImageLayout::eGeneral);
+				vk::DescriptorImageInfo fft5DescInfo(
+					vk::Sampler(), fftTargets_[5].GetView(), vk::ImageLayout::eGeneral);
+
 				vk::DescriptorBufferInfo dbInfo = sceneBuffer_.GetDescInfo();
 
 				// デスクリプタセットは作成済みのデスクリプタプールから確保する
 				vk::DescriptorSetAllocateInfo allocInfo;
 				allocInfo.descriptorPool = descPool_;
-				allocInfo.descriptorSetCount = static_cast<uint32_t>(descLayouts_.size());
-				allocInfo.pSetLayouts = descLayouts_.data();
+				allocInfo.descriptorSetCount = static_cast<uint32_t>(refLayouts.size());
+				allocInfo.pSetLayouts = refLayouts.data();
 				descSets_ = device.GetDevice().allocateDescriptorSets(allocInfo);
 
 				// デスクリプタセットの情報を更新する
-				std::array<vk::WriteDescriptorSet, 6> descSetInfos{
+				std::array<vk::WriteDescriptorSet, 24> descSetInfos{
 					vk::WriteDescriptorSet(descSets_[0], 0, 0, 1, vk::DescriptorType::eUniformBuffer, nullptr, &dbInfo, nullptr),
 					vk::WriteDescriptorSet(descSets_[0], 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &texDescInfo, nullptr, nullptr),
 					vk::WriteDescriptorSet(descSets_[1], 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &postDescInfo, nullptr, nullptr),
 					vk::WriteDescriptorSet(descSets_[1], 2, 0, 1, vk::DescriptorType::eCombinedImageSampler, &postDepthDescInfo, nullptr, nullptr),
 					vk::WriteDescriptorSet(descSets_[2], 0, 0, 1, vk::DescriptorType::eStorageImage, &computeInDescInfo, nullptr, nullptr),
 					vk::WriteDescriptorSet(descSets_[2], 1, 0, 1, vk::DescriptorType::eStorageImage, &computeOutDescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[3], 0, 0, 1, vk::DescriptorType::eUniformBuffer, nullptr, &dbInfo, nullptr),
+					vk::WriteDescriptorSet(descSets_[3], 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &fftvRDescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[3], 2, 0, 1, vk::DescriptorType::eCombinedImageSampler, &fftvIDescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[4], 0, 0, 1, vk::DescriptorType::eStorageImage, &fftSrcDescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[4], 2, 0, 1, vk::DescriptorType::eStorageImage, &fft0DescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[4], 3, 0, 1, vk::DescriptorType::eStorageImage, &fft1DescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[5], 0, 0, 1, vk::DescriptorType::eStorageImage, &fft0DescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[5], 1, 0, 1, vk::DescriptorType::eStorageImage, &fft1DescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[5], 2, 0, 1, vk::DescriptorType::eStorageImage, &fft2DescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[5], 3, 0, 1, vk::DescriptorType::eStorageImage, &fft3DescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[6], 0, 0, 1, vk::DescriptorType::eStorageImage, &fft2DescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[6], 1, 0, 1, vk::DescriptorType::eStorageImage, &fft3DescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[6], 2, 0, 1, vk::DescriptorType::eStorageImage, &fft0DescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[6], 3, 0, 1, vk::DescriptorType::eStorageImage, &fft1DescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[7], 0, 0, 1, vk::DescriptorType::eStorageImage, &fft0DescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[7], 1, 0, 1, vk::DescriptorType::eStorageImage, &fft1DescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[7], 2, 0, 1, vk::DescriptorType::eStorageImage, &fft4DescInfo, nullptr, nullptr),
+					vk::WriteDescriptorSet(descSets_[7], 3, 0, 1, vk::DescriptorType::eStorageImage, &fft5DescInfo, nullptr, nullptr),
 				};
 				device.GetDevice().updateDescriptorSets(descSetInfos, nullptr);
 			}
@@ -674,6 +943,20 @@ private:
 			pPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
 			pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
 			pipeLayout_ = device.GetDevice().createPipelineLayout(pPipelineLayoutCreateInfo);
+		}
+		{
+			// 今回はPushConstantを利用する
+			// 小さなサイズの定数バッファはコマンドバッファに乗せてシェーダに送ることが可能
+			vk::PushConstantRange pushConstantRange(vk::ShaderStageFlagBits::eVertex, 0, sizeof(MeshData));
+
+			// デスクリプタセットレイアウトに対応したパイプラインレイアウトを生成する
+			// 通常は1対1で生成するのかな？
+			vk::PipelineLayoutCreateInfo pPipelineLayoutCreateInfo;
+			pPipelineLayoutCreateInfo.setLayoutCount = 1;
+			pPipelineLayoutCreateInfo.pSetLayouts = &descLayouts_[3];
+			pPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+			pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
+			fftViewPipeLayout_ = device.GetDevice().createPipelineLayout(pPipelineLayoutCreateInfo);
 		}
 
 		// 描画トポロジの設定
@@ -789,6 +1072,18 @@ private:
 
 		pipeline_ = device.GetDevice().createGraphicsPipelines(device.GetPipelineCache(), pipelineCreateInfo, nullptr)[0];
 		if (!pipeline_)
+		{
+			return false;
+		}
+
+		shaderStages[1].stage = vk::ShaderStageFlagBits::eFragment;
+		shaderStages[1].module = psView_.GetModule();
+		shaderStages[1].pName = "main";
+
+		pipelineCreateInfo.layout = fftViewPipeLayout_;
+
+		fftViewPipeline_ = device.GetDevice().createGraphicsPipelines(device.GetPipelineCache(), pipelineCreateInfo, nullptr)[0];
+		if (!fftViewPipeline_)
 		{
 			return false;
 		}
@@ -927,16 +1222,47 @@ private:
 		return true;
 	}
 
+	bool InitializeFFTPipeline(vsl::Device& device)
+	{
+		{
+			// デスクリプタセットレイアウトに対応したパイプラインレイアウトを生成する
+			// 通常は1対1で生成するのかな？
+			vk::PipelineLayoutCreateInfo pPipelineLayoutCreateInfo;
+			pPipelineLayoutCreateInfo.setLayoutCount = 1;
+			pPipelineLayoutCreateInfo.pSetLayouts = &descLayouts_[4];
+			fftPipeLayout_ = device.GetDevice().createPipelineLayout(pPipelineLayoutCreateInfo);
+		}
+
+		for (int i = 0; i < ARRAYSIZE(fftPipelines_); i++)
+		{
+			// シェーダステージの設定
+			vk::PipelineShaderStageCreateInfo shaderInfo(vk::PipelineShaderStageCreateFlags(), vk::ShaderStageFlagBits::eCompute, csFFTs_[i].GetModule(), "main");
+
+			// パイプライン生成
+			vk::ComputePipelineCreateInfo pipelineCreateInfo(vk::PipelineCreateFlags(), shaderInfo, fftPipeLayout_);
+
+			fftPipelines_[i] = device.GetDevice().createComputePipeline(device.GetPipelineCache(), pipelineCreateInfo);
+			if (!fftPipelines_[i])
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 private:
 	vsl::RenderPass	meshPass_, postPass_;
 	vsl::Image		depthBuffer_;
 	vsl::Image		offscreenBuffer_, computeBuffer_;
+	vsl::Image		fftTargets_[6];
 	std::vector<vk::Framebuffer>	frameBuffers_;
 	vk::Framebuffer	offscreenFrame_;
 
-	vsl::Shader		vsTest_, psTest_;
+	vsl::Shader		vsTest_, psTest_, psView_;
 	vsl::Shader		vsPost_, psPost_;
 	vsl::Shader		csTest_;
+	vsl::Shader		csFFTs_[4];
 	vsl::Buffer		vbuffer_, ibuffer_;
 	vsl::Buffer		sceneBuffer_;
 	vsl::Image		texture_;
@@ -948,6 +1274,8 @@ private:
 
 	vk::PipelineLayout	pipeLayout_;
 	vk::Pipeline		pipeline_;
+	vk::PipelineLayout	fftViewPipeLayout_;
+	vk::Pipeline		fftViewPipeline_;
 
 	vk::PipelineLayout	postPipeLayout_;
 	vk::Pipeline		postPipeline_;
@@ -955,11 +1283,16 @@ private:
 	vk::PipelineLayout	computePipeLayout_;
 	vk::Pipeline		computePipeline_;
 
+	vk::PipelineLayout	fftPipeLayout_;
+	vk::Pipeline		fftPipelines_[4];
+
 	vsl::Gui		gui_;
 
 	vsl::Buffer		vbStaging_, ibStaging_, texStaging_, fontStaging_;
 
 	bool isComputeOn_{ true };
+	bool isFFTComplete_{ false };
+	int viewType_{ 0 };
 };	// class MySample
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow)

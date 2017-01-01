@@ -29,7 +29,7 @@ namespace vsl
 		void SubmitAndPresent();
 
 		// utility
-		uint32_t FindQueue(vk::QueueFlags queueFlag, const vk::SurfaceKHR& surface = vk::SurfaceKHR());
+		uint32_t FindQueue(vk::QueueFlags queueFlag, vk::QueueFlags notFlag = vk::QueueFlags(), const vk::SurfaceKHR& surface = vk::SurfaceKHR());
 		uint32_t GetMemoryTypeIndex(uint32_t bits, const vk::MemoryPropertyFlags& properties);
 
 		// getter
@@ -38,10 +38,13 @@ namespace vsl
 		vk::Device&			GetDevice()			{ return vkDevice_; }
 		vk::PipelineCache&	GetPipelineCache()	{ return vkPipelineCache_; }
 		vk::Queue&			GetQueue()			{ return vkQueue_; }
+		vk::Queue&			GetComputeQueue()	{ return vkComputeQueue_; }
 		vk::CommandPool&	GetCommandPool()	{ return vkCmdPool_; }
 
-		std::vector<vk::CommandBuffer>&	GetCommandBuffers()			{ return vkCmdBuffers_; }
-		vk::CommandBuffer&				GetCurrentCommandBuffer()	{ return vkCmdBuffers_[currentBufferIndex_]; }
+		std::vector<vk::CommandBuffer>&	GetCommandBuffers()				{ return vkCmdBuffers_; }
+		vk::CommandBuffer&				GetCurrentCommandBuffer()		{ return vkCmdBuffers_[currentBufferIndex_]; }
+		std::vector<vk::CommandBuffer>&	GetComputeCommandBuffers()		{ return vkComputeCmdBuffers_; }
+		vk::CommandBuffer&				GetCurrentComputeCommandBuffer(){ return vkComputeCmdBuffers_[currentBufferIndex_]; }
 
 		Swapchain&	GetSwapchain()					{ return vkSwapchain_; }
 		uint32_t	GetCurrentBufferIndex() const	{ return currentBufferIndex_; }
@@ -52,12 +55,13 @@ namespace vsl
 		vk::PhysicalDevice		vkPhysicalDevice_;
 		vk::Device				vkDevice_;
 		vk::PipelineCache		vkPipelineCache_;
-		vk::Queue				vkQueue_;
+		vk::Queue				vkQueue_, vkComputeQueue_;
 		vk::CommandPool			vkCmdPool_;
 		vk::Semaphore			vkPresentComplete_;
 		vk::Semaphore			vkRenderComplete_;
 
 		std::vector<vk::CommandBuffer>	vkCmdBuffers_;
+		std::vector<vk::CommandBuffer>	vkComputeCmdBuffers_;
 
 		Swapchain	vkSwapchain_;
 		uint32_t	currentBufferIndex_{ 0 };

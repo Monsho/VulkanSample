@@ -226,6 +226,14 @@ namespace vsl
 			return false;
 		}
 
+		// カラーチャンネルのスワップを行う
+		for (size_t s = 0; s < tgaImage.width * tgaImage.height; s++)
+		{
+			size_t rc = s * 4 + 2;
+			size_t bc = s * 4 + 0;
+			std::swap(tgaImage.image_data[rc], tgaImage.image_data[bc]);
+		}
+
 		vk::Device& device = owner.GetDevice();
 		bool ret = false;
 
@@ -236,7 +244,7 @@ namespace vsl
 			goto end;
 		}
 
-		if (!InitializeFromStaging(owner, cmdBuff, staging, vk::Format::eB8G8R8A8Unorm, tgaImage.width, tgaImage.height))
+		if (!InitializeFromStaging(owner, cmdBuff, staging, vk::Format::eR8G8B8A8Unorm, tgaImage.width, tgaImage.height))
 		{
 			goto end;
 		}
@@ -274,7 +282,7 @@ end:
 			imageCreateInfo.mipLevels = mipLevels;
 			imageCreateInfo.format = format_;
 			imageCreateInfo.extent = vk::Extent3D(width, height, 1);
-			imageCreateInfo.usage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst;
+			imageCreateInfo.usage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eStorage;
 			imageCreateInfo.initialLayout = vk::ImageLayout::ePreinitialized;
 			image_ = device.createImage(imageCreateInfo);
 			if (!image_)

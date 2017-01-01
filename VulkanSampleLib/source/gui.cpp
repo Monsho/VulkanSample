@@ -432,23 +432,25 @@ namespace vsl
 	{
 		if (pOwner_)
 		{
+			vk::Device& d = pOwner_->GetDevice();
+
 			delete[] vertexBuffers_;
 			delete[] indexBuffers_;
 
 			if (fontSampler_)
 			{
-				pOwner_->GetDevice().destroySampler(fontSampler_);
+				d.destroySampler(fontSampler_);
 				fontSampler_ = vk::Sampler();
 			}
 
 			if (descPool_)
 			{
-				pOwner_->GetDevice().destroyDescriptorPool(descPool_);
+				d.destroyDescriptorPool(descPool_);
 				descPool_ = vk::DescriptorPool();
 			}
 			if (descSetLayout_)
 			{
-				pOwner_->GetDevice().destroyDescriptorSetLayout(descSetLayout_);
+				d.destroyDescriptorSetLayout(descSetLayout_);
 				descSetLayout_ = vk::DescriptorSetLayout();
 			}
 
@@ -458,6 +460,9 @@ namespace vsl
 			pshader_.Destroy();
 
 			renderPass_.Destroy();
+
+			d.destroyPipeline(pipeline_);
+			d.destroyPipelineLayout(pipelineLayout_);
 
 			pOwner_ = nullptr;
 		}

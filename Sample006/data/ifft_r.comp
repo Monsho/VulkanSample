@@ -1,0 +1,12 @@
+#version 450
+
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_ARB_shading_language_420pack : enable
+#extension GL_GOOGLE_include_directive : enable
+
+#define LENGTH 256
+#define BUTTERFLY_COUNT 8
+#define ROWPASS 1
+#define TRANSFORM_INVERSE 1
+
+#include "fft.h"

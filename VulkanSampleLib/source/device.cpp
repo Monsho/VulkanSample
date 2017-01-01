@@ -66,13 +66,13 @@ namespace
 namespace vsl
 {
 	//----
-	uint32_t Device::FindQueue(vk::QueueFlags queueFlag, const vk::SurfaceKHR& surface)
+	uint32_t Device::FindQueue(vk::QueueFlags queueFlag, vk::QueueFlags notFlag, const vk::SurfaceKHR& surface)
 	{
 		std::vector<vk::QueueFamilyProperties> queueProps = vkPhysicalDevice_.getQueueFamilyProperties();
 		size_t queueCount = queueProps.size();
 		for (uint32_t i = 0; i < queueCount; i++)
 		{
-			if ((queueProps[i].queueFlags & queueFlag) == queueFlag)
+			if (((queueProps[i].queueFlags & queueFlag) == queueFlag) && !(queueProps[i].queueFlags & notFlag))
 			{
 				if (surface && !vkPhysicalDevice_.getSurfaceSupportKHR(i, surface))
 				{
@@ -163,16 +163,38 @@ namespace vsl
 
 		// Vulkan device
 		uint32_t graphicsQueueIndex = 0;
+		uint32_t computeQueueIndex = 0;
 		{
 			// グラフィクス用のキューを検索する
 			// NOTE: Computeも可能なキューを検索
 			graphicsQueueIndex = FindQueue(vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute);
+			if (graphicsQueueIndex == kQueueIndexNotFound)
+			{
+				return false;
+			}
+			computeQueueIndex = FindQueue(vk::QueueFlagBits::eCompute, vk::QueueFlagBits::eGraphics);
 
 			float queuePriorities[] = { 0.0f };
-			vk::DeviceQueueCreateInfo queueCreateInfo;
-			queueCreateInfo.queueFamilyIndex = graphicsQueueIndex;
-			queueCreateInfo.queueCount = 1;
-			queueCreateInfo.pQueuePriorities = queuePriorities;
+			std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
+			{
+				vk::DeviceQueueCreateInfo info;
+				info.queueFamilyIndex = graphicsQueueIndex;
+				info.queueCount = 1;
+				info.pQueuePriorities = queuePriorities;
+				queueCreateInfos.push_back(info);
+			}
+			if (computeQueueIndex != kQueueIndexNotFound)
+			{
+				vk::DeviceQueueCreateInfo info;
+				info.queueFamilyIndex = computeQueueIndex;
+				info.queueCount = 1;
+				info.pQueuePriorities = queuePriorities;
+				queueCreateInfos.push_back(info);
+			}
+			else
+			{
+				computeQueueIndex = graphicsQueueIndex;
+			}
 
 			vk::PhysicalDeviceFeatures deviceFeatures = vkPhysicalDevice_.getFeatures();
 
@@ -183,8 +205,8 @@ namespace vsl
 #endif
 			};
 			vk::DeviceCreateInfo deviceCreateInfo;
-			deviceCreateInfo.queueCreateInfoCount = 1;
-			deviceCreateInfo.pQueueCreateInfos = &queueCreateInfo;
+			deviceCreateInfo.queueCreateInfoCount = queueCreateInfos.size();
+			deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
 			deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
 			deviceCreateInfo.enabledExtensionCount = (uint32_t)ARRAYSIZE(enabledExtensions);
 			deviceCreateInfo.ppEnabledExtensionNames = enabledExtensions;
@@ -214,6 +236,7 @@ namespace vsl
 
 		vkPipelineCache_ = vkDevice_.createPipelineCache(vk::PipelineCacheCreateInfo());
 		vkQueue_ = vkDevice_.getQueue(graphicsQueueIndex, 0);
+		vkComputeQueue_ = vkDevice_.getQueue(computeQueueIndex, 0);
 
 		// コマンドプール作成
 		vk::CommandPoolCreateInfo cmdPoolInfo;
@@ -253,6 +276,7 @@ namespace vsl
 			allocInfo.commandPool = vkCmdPool_;
 			allocInfo.commandBufferCount = vkSwapchain_.GetImageCount();
 			vkCmdBuffers_ = vkDevice_.allocateCommandBuffers(allocInfo);
+			vkComputeCmdBuffers_ = vkDevice_.allocateCommandBuffers(allocInfo);
 		}
 
 		return true;
@@ -263,9 +287,11 @@ namespace vsl
 	void Device::DestroyContext()
 	{
 		// Idle状態になるのを待つ
+		vkComputeQueue_.waitIdle();
 		vkQueue_.waitIdle();
 		vkDevice_.waitIdle();
 
+		vkDevice_.freeCommandBuffers(vkCmdPool_, vkComputeCmdBuffers_);
 		vkDevice_.freeCommandBuffers(vkCmdPool_, vkCmdBuffers_);
 		vkDevice_.destroySemaphore(vkPresentComplete_);
 		vkDevice_.destroySemaphore(vkRenderComplete_);

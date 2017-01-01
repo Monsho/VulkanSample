@@ -37,7 +37,7 @@ namespace vsl
 		}
 		colorSpace_ = surfaceFormats[0].colorSpace;
 
-		graphicsQueueIndex_ = owner.FindQueue(vk::QueueFlagBits::eGraphics, surface_);
+		graphicsQueueIndex_ = owner.FindQueue(vk::QueueFlagBits::eGraphics, vk::QueueFlags(), surface_);
 		if (graphicsQueueIndex_ == Application::kQueueIndexNotFound)
 		{
 			return false;
