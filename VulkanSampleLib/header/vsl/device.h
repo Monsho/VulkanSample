@@ -56,7 +56,7 @@ namespace vsl
 		vk::Device				vkDevice_;
 		vk::PipelineCache		vkPipelineCache_;
 		vk::Queue				vkQueue_, vkComputeQueue_;
-		vk::CommandPool			vkCmdPool_;
+		vk::CommandPool			vkCmdPool_, vkComputeCmdPool_;
 		vk::Semaphore			vkPresentComplete_;
 		vk::Semaphore			vkRenderComplete_;
 

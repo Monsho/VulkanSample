@@ -17,46 +17,6 @@ namespace
 {
 	static const uint16_t kScreenWidth = 1920;
 	static const uint16_t kScreenHeight = 1080;
-
-	void BitReverse(int *Indices, int N, int n)
-	{
-		unsigned int mask = 0x1;
-		for (int j = 0; j < N; j++)
-		{
-			unsigned int val = 0x0;
-			int temp = int(Indices[j]);
-			for (int i = 0; i < n; i++)
-			{
-				unsigned int t = (mask & temp);
-				val = (val << 1) | t;
-				temp = temp >> 1;
-			}
-			Indices[j] = val;
-		}
-	}
-
-	void GetButterflyValues(int butterflyPass, int NumButterflies, int x, int *i1, int *i2, float *w1, float *w2)
-	{
-		int sectionWidth = 2 << butterflyPass;
-		int halfSectionWidth = sectionWidth / 2;
-
-		int sectionStartOffset = x & ~(sectionWidth - 1);
-		int halfSectionOffset = x & (halfSectionWidth - 1);
-		int sectionOffset = x & (sectionWidth - 1);
-
-		*w1 = float(cosl(2.0f*3.1415926f*sectionOffset / (float)sectionWidth));
-		*w2 = float(-sinl(2.0f*3.1415926f*sectionOffset / (float)sectionWidth));
-
-		*i1 = sectionStartOffset + halfSectionOffset;
-		*i2 = sectionStartOffset + halfSectionOffset + halfSectionWidth;
-
-		if (butterflyPass == 0)
-		{
-			BitReverse(i1, 1, NumButterflies);
-			BitReverse(i2, 1, NumButterflies);
-		}
-	}
-
 }	// namespace
 
 bool Initialize(vsl::Device& device)
@@ -104,15 +64,6 @@ public:
 	//----
 	bool Initialize(vsl::Device& device)
 	{
-		int i1, i2;
-		float w1, w2;
-		for (int i = 0; i < 256; i++)
-		{
-			GetButterflyValues(0, 8, i, &i1, &i2, &w1, &w2);
-			char s[256];
-			sprintf_s(s, 256, "%d : %f, %f\n", i, w1, w2);
-			OutputDebugStringA(s);
-		}
 		// レンダーパスの初期化
 		if (!InitializeMeshPass(device))
 		{
@@ -280,6 +231,7 @@ public:
 			device.GetDevice().updateDescriptorSets(descSetInfos, nullptr);
 		}
 		if (ImGui::Button("Compute FFT"))
+#if 0
 		{
 			vk::ImageSubresourceRange colorSubRange;
 			colorSubRange.aspectMask = vk::ImageAspectFlagBits::eColor;
@@ -341,8 +293,14 @@ public:
 			isFFTComplete_ = true;
 			viewType_ = 1;
 		}
+#else
+		{
+			RunFFT(device);
+		}
+		EndCalcFFT(device);
+#endif
 		static const char* kViewTypeStrs[] = {"Texture", "FFT", "InvFFT"};
-		if (ImGui::Combo("View Type", &viewType_, kViewTypeStrs, ARRAYSIZE(kViewTypeStrs)))
+		if (ImGui::Combo("View Type", &viewType_, kViewTypeStrs, ARRAYSIZE(kViewTypeStrs)) || isForceTypeChange_)
 		{
 			if (isFFTComplete_)
 			{
@@ -454,9 +412,12 @@ public:
 			cmdBuffer.bindVertexBuffers(0, vbuffer_.GetBuffer(), offsets);
 			cmdBuffer.bindIndexBuffer(ibuffer_.GetBuffer(), 0, vk::IndexType::eUint32);
 
+			static float sAngle = 0.0f;
 			MeshData mesh1;
-			mesh1.mtxModel_ = glm::scale(glm::mat4x4(), glm::vec3(1.5f, 1.5f, 1.0f));
-			mesh1.mtxModel_[3].z = 8.0f;
+			mesh1.mtxModel_ = glm::scale(glm::mat4x4(), glm::vec3(4.0f, 4.0f, 1.0f));
+			mesh1.mtxModel_ = glm::rotate(mesh1.mtxModel_, glm::radians(sAngle), glm::vec3(0.0f, 1.0f, 0.0f));
+			sAngle += 0.1f; if (sAngle > 360.0f) sAngle -= 360.0f;
+			mesh1.mtxModel_[3].z = 0.0f;
 			cmdBuffer.pushConstants(pipeLayout_, vk::ShaderStageFlagBits::eVertex, 0, sizeof(mesh1), &mesh1);
 			cmdBuffer.drawIndexed(6, 1, 0, 0, 1);
 		}
@@ -544,6 +505,11 @@ public:
 	void Terminate(vsl::Device& device)
 	{
 		vk::Device& d = device.GetDevice();
+
+		if (computeFence_)
+		{
+			d.destroyFence(computeFence_);
+		}
 
 		gui_.Destroy();
 
@@ -1251,6 +1217,113 @@ private:
 		return true;
 	}
 
+	void RunFFT(vsl::Device& device)
+	{
+		if (computeFence_)
+		{
+			return;
+		}
+
+		isForceTypeChange_ = true;
+		viewType_ = 0;
+
+		auto& cmdBuffer = device.GetComputeCommandBuffers()[0];
+
+		// コマンド積み込み開始
+		vk::CommandBufferBeginInfo beginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+		cmdBuffer.begin(&beginInfo);
+
+		// FFT計算処理のコマンド積み込み
+		for (int i = 0; i < 1000; i++)
+		{
+			vk::ImageSubresourceRange colorSubRange;
+			colorSubRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+			colorSubRange.levelCount = 1;
+			colorSubRange.layerCount = 1;
+			fftTargets_[0].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+			fftTargets_[1].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+
+			// row pass を処理する
+			{
+				// dispatch
+				cmdBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, fftPipelines_[0]);
+				cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, fftPipeLayout_, 0, descSets_[4], nullptr);
+				cmdBuffer.dispatch(1, texture_.GetHeight(), 1);
+			}
+
+			fftTargets_[0].SetImageLayout(cmdBuffer, vk::ImageLayout::eShaderReadOnlyOptimal, colorSubRange);
+			fftTargets_[1].SetImageLayout(cmdBuffer, vk::ImageLayout::eShaderReadOnlyOptimal, colorSubRange);
+			fftTargets_[2].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+			fftTargets_[3].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+
+			// collums pass を処理する
+			{
+				// dispatch
+				cmdBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, fftPipelines_[1]);
+				cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, fftPipeLayout_, 0, descSets_[5], nullptr);
+				cmdBuffer.dispatch(1, texture_.GetWidth(), 1);
+			}
+
+			fftTargets_[2].SetImageLayout(cmdBuffer, vk::ImageLayout::eShaderReadOnlyOptimal, colorSubRange);
+			fftTargets_[3].SetImageLayout(cmdBuffer, vk::ImageLayout::eShaderReadOnlyOptimal, colorSubRange);
+			fftTargets_[0].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+			fftTargets_[1].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+
+			// invert row pass を処理する
+			{
+				// dispatch
+				cmdBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, fftPipelines_[2]);
+				cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, fftPipeLayout_, 0, descSets_[6], nullptr);
+				cmdBuffer.dispatch(1, texture_.GetHeight(), 1);
+			}
+
+			fftTargets_[0].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+			fftTargets_[1].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+			fftTargets_[4].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+			fftTargets_[5].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+
+			// invert collums pass を処理する
+			{
+				// dispatch
+				cmdBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, fftPipelines_[3]);
+				cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, fftPipeLayout_, 0, descSets_[7], nullptr);
+				cmdBuffer.dispatch(1, texture_.GetWidth(), 1);
+			}
+
+			fftTargets_[4].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+			fftTargets_[5].SetImageLayout(cmdBuffer, vk::ImageLayout::eGeneral, colorSubRange);
+		}
+
+		// コマンド積み込み完了
+		cmdBuffer.end();
+
+		// フェンスの作成
+		computeFence_ = device.GetDevice().createFence(vk::FenceCreateInfo());
+
+		// フェンスを使ってSubmit
+		vk::SubmitInfo submitInfo;
+		submitInfo.pCommandBuffers = &cmdBuffer;
+		submitInfo.commandBufferCount = 1;
+		device.GetComputeQueue().submit(submitInfo, computeFence_);
+	}
+
+	void EndCalcFFT(vsl::Device& device)
+	{
+		if (computeFence_ && (device.GetDevice().getFenceStatus(computeFence_) == vk::Result::eSuccess))
+		{
+			device.GetDevice().destroyFence(computeFence_);
+			computeFence_ = vk::Fence();
+
+			isFFTComplete_ = true;
+			viewType_ = 1;
+			OutputDebugString(L"\n");
+		}
+		else if (computeFence_ && (device.GetDevice().getFenceStatus(computeFence_) != vk::Result::eSuccess))
+		{
+			OutputDebugString(L".");
+		}
+	}
+
 private:
 	vsl::RenderPass	meshPass_, postPass_;
 	vsl::Image		depthBuffer_;
@@ -1290,8 +1363,11 @@ private:
 
 	vsl::Buffer		vbStaging_, ibStaging_, texStaging_, fontStaging_;
 
+	vk::Fence			computeFence_{};
+
 	bool isComputeOn_{ true };
 	bool isFFTComplete_{ false };
+	bool isForceTypeChange_{ false };
 	int viewType_{ 0 };
 };	// class MySample
 

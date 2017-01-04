@@ -174,7 +174,8 @@ namespace vsl
 			}
 			computeQueueIndex = FindQueue(vk::QueueFlagBits::eCompute, vk::QueueFlagBits::eGraphics);
 
-			float queuePriorities[] = { 0.0f };
+			float queuePriorities[] = { 0.5f };
+			float computeQueuePriorities[] = { 0.3f };
 			std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
 			{
 				vk::DeviceQueueCreateInfo info;
@@ -188,7 +189,7 @@ namespace vsl
 				vk::DeviceQueueCreateInfo info;
 				info.queueFamilyIndex = computeQueueIndex;
 				info.queueCount = 1;
-				info.pQueuePriorities = queuePriorities;
+				info.pQueuePriorities = computeQueuePriorities;
 				queueCreateInfos.push_back(info);
 			}
 			else
@@ -205,7 +206,7 @@ namespace vsl
 #endif
 			};
 			vk::DeviceCreateInfo deviceCreateInfo;
-			deviceCreateInfo.queueCreateInfoCount = queueCreateInfos.size();
+			deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
 			deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
 			deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
 			deviceCreateInfo.enabledExtensionCount = (uint32_t)ARRAYSIZE(enabledExtensions);
@@ -244,6 +245,9 @@ namespace vsl
 		cmdPoolInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
 		vkCmdPool_ = vkDevice_.createCommandPool(cmdPoolInfo);
 
+		cmdPoolInfo.queueFamilyIndex = computeQueueIndex;
+		vkComputeCmdPool_ = vkDevice_.createCommandPool(cmdPoolInfo);
+
 		// スワップチェイン初期化
 		if (!vkSwapchain_.Initialize(*this, hInst, hWnd))
 		{
@@ -276,6 +280,8 @@ namespace vsl
 			allocInfo.commandPool = vkCmdPool_;
 			allocInfo.commandBufferCount = vkSwapchain_.GetImageCount();
 			vkCmdBuffers_ = vkDevice_.allocateCommandBuffers(allocInfo);
+
+			allocInfo.commandPool = vkComputeCmdPool_;
 			vkComputeCmdBuffers_ = vkDevice_.allocateCommandBuffers(allocInfo);
 		}
 
@@ -291,13 +297,14 @@ namespace vsl
 		vkQueue_.waitIdle();
 		vkDevice_.waitIdle();
 
-		vkDevice_.freeCommandBuffers(vkCmdPool_, vkComputeCmdBuffers_);
+		vkDevice_.freeCommandBuffers(vkComputeCmdPool_, vkComputeCmdBuffers_);
 		vkDevice_.freeCommandBuffers(vkCmdPool_, vkCmdBuffers_);
 		vkDevice_.destroySemaphore(vkPresentComplete_);
 		vkDevice_.destroySemaphore(vkRenderComplete_);
 
 		vkSwapchain_.Destroy();
 
+		vkDevice_.destroyCommandPool(vkComputeCmdPool_);
 		vkDevice_.destroyCommandPool(vkCmdPool_);
 		vkDevice_.destroyPipelineCache(vkPipelineCache_);
 		vkDevice_.destroy();
