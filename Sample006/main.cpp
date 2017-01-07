@@ -571,7 +571,7 @@ private:
 		if (!csFFTs_[3].CreateFromFile(device, "data/ifft_c.comp.spv")) { return false; }
 
 		// テクスチャ読み込み
-		if (!texture_.InitializeFromTgaImage(device, initCmdBuffer, texStaging_, "data/default.tga"))
+		if (!texture_.InitializeFromTgaImage(device, initCmdBuffer, texStaging_, "data/icon.tga"))
 		{
 			return false;
 		}
