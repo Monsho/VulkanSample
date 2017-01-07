@@ -173,28 +173,25 @@ namespace vsl
 				return false;
 			}
 			computeQueueIndex = FindQueue(vk::QueueFlagBits::eCompute, vk::QueueFlagBits::eGraphics);
+			computeQueueIndex = (computeQueueIndex == kQueueIndexNotFound) ? graphicsQueueIndex : computeQueueIndex;
 
-			float queuePriorities[] = { 0.5f };
+			float queuePriorities[] = { 0.5f, 0.3f };
 			float computeQueuePriorities[] = { 0.3f };
 			std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
 			{
 				vk::DeviceQueueCreateInfo info;
 				info.queueFamilyIndex = graphicsQueueIndex;
-				info.queueCount = 1;
+				info.queueCount = (computeQueueIndex == graphicsQueueIndex) ? 2 : 1;
 				info.pQueuePriorities = queuePriorities;
 				queueCreateInfos.push_back(info);
 			}
-			if (computeQueueIndex != kQueueIndexNotFound)
+			if (computeQueueIndex != graphicsQueueIndex)
 			{
 				vk::DeviceQueueCreateInfo info;
 				info.queueFamilyIndex = computeQueueIndex;
 				info.queueCount = 1;
 				info.pQueuePriorities = computeQueuePriorities;
 				queueCreateInfos.push_back(info);
-			}
-			else
-			{
-				computeQueueIndex = graphicsQueueIndex;
 			}
 
 			vk::PhysicalDeviceFeatures deviceFeatures = vkPhysicalDevice_.getFeatures();
@@ -237,7 +234,7 @@ namespace vsl
 
 		vkPipelineCache_ = vkDevice_.createPipelineCache(vk::PipelineCacheCreateInfo());
 		vkQueue_ = vkDevice_.getQueue(graphicsQueueIndex, 0);
-		vkComputeQueue_ = vkDevice_.getQueue(computeQueueIndex, 0);
+		vkComputeQueue_ = vkDevice_.getQueue(computeQueueIndex, (computeQueueIndex == graphicsQueueIndex) ? 1 : 0);
 
 		// コマンドプール作成
 		vk::CommandPoolCreateInfo cmdPoolInfo;
@@ -348,23 +345,41 @@ namespace vsl
 	}
 
 	//----
-	void Device::SubmitAndPresent()
+	void Device::SubmitAndPresent(uint32_t waitSemaphoreCount, vk::Semaphore* pWaitSemaphores, vk::PipelineStageFlags* pWaitStages, uint32_t signalSemaphoreCount, vk::Semaphore* pSignalSemaphores)
 	{
 		// Submit
 		{
-			vk::PipelineStageFlags pipelineStages = vk::PipelineStageFlagBits::eBottomOfPipe;
+			std::vector<vk::Semaphore> waitSem(1), signalSem(1);
+			std::vector<vk::PipelineStageFlags> waitFlags(1);
+			waitSem[0] = vkPresentComplete_;
+			signalSem[0] = vkRenderComplete_;
+			waitFlags[0] = vk::PipelineStageFlagBits::eBottomOfPipe;
+
+			assert(!((waitSemaphoreCount > 0) && (pWaitSemaphores == nullptr)));
+			assert(!((waitSemaphoreCount > 0) && (pWaitStages == nullptr)));
+			for (uint32_t i = 0; i < waitSemaphoreCount; i++)
+			{
+				waitSem.push_back(pWaitSemaphores[i]);
+				waitFlags.push_back(pWaitStages[i]);
+			}
+			assert(!((signalSemaphoreCount > 0) && (pSignalSemaphores == nullptr)));
+			for (uint32_t i = 0; i < signalSemaphoreCount; i++)
+			{
+				signalSem.push_back(pSignalSemaphores[i]);
+			}
+
 			vk::SubmitInfo submitInfo;
-			submitInfo.pWaitDstStageMask = &pipelineStages;
 			// 待つ必要があるセマフォの数とその配列を渡す
-			submitInfo.waitSemaphoreCount = 1;
-			submitInfo.pWaitSemaphores = &vkPresentComplete_;
+			submitInfo.waitSemaphoreCount = static_cast<uint32_t>(waitSem.size());
+			submitInfo.pWaitSemaphores = waitSem.data();
+			submitInfo.pWaitDstStageMask = waitFlags.data();
 			// Submitするコマンドバッファの配列を渡す
 			// 複数のコマンドバッファをSubmitしたい場合は配列にする
 			submitInfo.commandBufferCount = 1;
 			submitInfo.pCommandBuffers = &GetCurrentCommandBuffer();
 			// 描画完了を知らせるセマフォを登録する
-			submitInfo.signalSemaphoreCount = 1;
-			submitInfo.pSignalSemaphores = &vkRenderComplete_;
+			submitInfo.signalSemaphoreCount = static_cast<uint32_t>(signalSem.size());
+			submitInfo.pSignalSemaphores = signalSem.data();
 
 			// Queueに対してSubmitする
 			vk::Fence fence = vkSwapchain_.GetSubmitFence(true);

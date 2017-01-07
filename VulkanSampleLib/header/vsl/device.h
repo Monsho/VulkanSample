@@ -26,7 +26,7 @@ namespace vsl
 		uint32_t AcquireNextImage() { return currentBufferIndex_ = vkSwapchain_.AcquireNextImage(vkPresentComplete_); }
 		vk::CommandBuffer& BeginMainCommandBuffer();
 		void ReadyPresentAndEndMainCommandBuffer();
-		void SubmitAndPresent();
+		void SubmitAndPresent(uint32_t waitSemaphoreCount = 0, vk::Semaphore* pWaitSemaphores = nullptr, vk::PipelineStageFlags* pWaitStages = nullptr, uint32_t signalSemaphoreCount = 0, vk::Semaphore* pSignalSemaphores = nullptr);
 
 		// utility
 		uint32_t FindQueue(vk::QueueFlags queueFlag, vk::QueueFlags notFlag = vk::QueueFlags(), const vk::SurfaceKHR& surface = vk::SurfaceKHR());
